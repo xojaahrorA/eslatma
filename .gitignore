@@ -1,0 +1,38 @@
+# dependencies
+node_modules/
+.pnp.*
+
+# next.js
+.next/
+out/
+build/
+
+# env — MAXFIY, hech qachon push qilmang!
+.env*
+*.pem
+
+# logs
+*.log
+dev.log
+server.log
+
+# os
+.DS_Store
+
+# android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/*.keystore
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+
+# misc
+*.tsbuildinfo
+next-env.d.ts
+.claude/
+.z-ai-config
+tool-results/
+upload/
+download/
