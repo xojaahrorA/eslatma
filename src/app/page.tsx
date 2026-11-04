@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { makeT } from "@/lib/i18n";
 import { inApk } from "@/lib/biometric";
@@ -14,12 +14,18 @@ import FocusView from "@/components/app/focus-view";
 import FinanceView from "@/components/app/finance-view";
 import AuditView from "@/components/app/audit-view";
 import AnalyticsView from "@/components/app/analytics-view";
+import AlarmView from "@/components/app/alarm-view";
+import SleepView from "@/components/app/sleep-view";
 import SettingsView from "@/components/app/settings-view";
 import MoreView from "@/components/app/more-view";
 import AISheet from "@/components/app/ai-sheet";
 import LockScreen from "@/components/app/lock-screen";
+import RingOverlay from "@/components/app/ring-overlay";
 import { TaskEditorDrawer, MissSheet } from "@/components/app/task-editor";
-import type { Task } from "@/lib/types";
+import { syncNotifs } from "@/lib/notify";
+import { syncAlarms, ringNotifId, scheduleRingNotif, cancelRingNotif, trackRingNotif } from "@/lib/alarm";
+import { isoLocal, parseLocal } from "@/lib/utils-app";
+import type { PendingRing, Task } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -46,6 +52,8 @@ const NAV: { view: ViewName; icon: typeof Sunrise; key: string }[] = [
 export default function Home() {
   const mounted = useMounted();
   const settings = useStore((s) => s.settings);
+  const tasks = useStore((s) => s.tasks);
+  const alarms = useStore((s) => s.alarms);
 
   const [view, setView] = useState<ViewName>("today");
   const [navHistory, setNavHistory] = useState<ViewName[]>([]);
@@ -54,6 +62,10 @@ export default function Home() {
   const [missTask, setMissTask] = useState<Task | null>(null);
   const [aiOpen, setAiOpen] = useState(false);
   const [focusTaskId, setFocusTaskId] = useState<string | null>(null);
+  // Zang (signal) oynasi — budilnik va "budilnik kabi" eslatmalar uchun
+  const [ringing, setRinging] = useState<PendingRing | null>(null);
+  const ringingRef = useRef<PendingRing | null>(null);
+  ringingRef.current = ringing;
   // APK banneri — faqat brauzerda (APK ichida yashirin), yopilsa sessiyada qaytmaydi.
   // "Capacitor" in window brauzerda ham true bo'lishi mumkin (@capacitor/core globali)
   // — shuning uchun isNativePlatform() bilan tekshiriladigan inApk() ishlatiladi.
@@ -92,6 +104,137 @@ export default function Home() {
     el.lang = settings.lang;
   }, [settings.theme, settings.fontScale, settings.lang]);
 
+  // ─── Eslatmalar sinxroni: vazifalar/sozlamalar o'zgarsa — qayta rejalash (debounce) ───
+  // Budilnik bildirishnomalari keepIds orqali saqlanadi (syncAlarms o'zi boshqaradi)
+  useEffect(() => {
+    const tm = setTimeout(() => {
+      const keep = new Set<number>();
+      for (const r of useStore.getState().pendingRings) {
+        if (r.kind === "alarm" || r.key.startsWith("snooze:")) keep.add(ringNotifId(r.key));
+      }
+      syncNotifs(tasks, settings, {
+        habitTitle: t("notif.habitTitle"),
+        habitBody: t("notif.habitBody"),
+        morningTitle: t("notif.morningTitle"),
+        morningBody: t("notif.morningBody"),
+        bedtimeTitle: t("sleep.bedtimeNotifTitle"),
+        bedtimeBody: t("sleep.bedtimeNotifBody"),
+      }, keep)
+        .then((res) => {
+          // "budilnik kabi" vazifa zanglarini yangilash (budilnik va snooze zanglari saqlanadi)
+          const prev = useStore.getState().pendingRings;
+          const kept = prev.filter((r) => r.kind !== "task" || r.key.startsWith("snooze:"));
+          useStore.getState().setPendingRings([...kept, ...res.taskRings]);
+        })
+        .catch(() => {});
+    }, 1200);
+    return () => clearTimeout(tm);
+  }, [tasks, settings, t]);
+
+  // ─── Budilniklar sinxroni: budilnik o'zgarsa — keyingi occurrence'ni qayta rejalash ───
+  useEffect(() => {
+    if (!mounted) return;
+    const tm = setTimeout(() => {
+      const prev = useStore.getState().pendingRings;
+      syncAlarms(alarms, prev)
+        .then((alarmRings) => {
+          const taskRings = prev.filter((r) => r.kind === "task" && !r.key.startsWith("snooze:"));
+          useStore.getState().setPendingRings([...alarmRings, ...taskRings]);
+        })
+        .catch(() => {});
+    }, 700);
+    return () => clearTimeout(tm);
+  }, [alarms, mounted]);
+
+  // ─── Zang qo'riqchisi: vaqti kelgan signal'ni ko'rsatish (15 sekundda tekshiradi) ───
+  // Ilova yopiq turganda bildirishnoma chaladi; qayta ochilganda shu watchdog
+  // o'chirilmagan zangni to'liq ekranli oynada ko'rsatadi (o'chmaydigan signal).
+  useEffect(() => {
+    const check = () => {
+      if (ringingRef.current) return;
+      const rings = useStore.getState().pendingRings;
+      const now = Date.now();
+      const due = rings.find((r) => (parseLocal(r.at)?.getTime() ?? Infinity) <= now);
+      if (due) setRinging(due);
+    };
+    check();
+    const iv = window.setInterval(check, 15_000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") check();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(iv);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  // ─── Bildirishnoma hodisalari: zang boshlandi / bosildi → oyna ochiladi ───
+  useEffect(() => {
+    if (!mounted) return;
+    let removed = false;
+    const handles: { remove: () => Promise<void> }[] = [];
+    import("@capacitor/local-notifications")
+      .then(({ LocalNotifications }) => {
+        if (removed) return;
+        void LocalNotifications.addListener("localNotificationReceived", (n) => {
+          const ring = useStore.getState().pendingRings.find((r) => ringNotifId(r.key) === Number(n.id));
+          if (ring && !ringingRef.current) setRinging(ring);
+        });
+        void LocalNotifications.addListener("localNotificationActionPerformed", (a) => {
+          const ring = useStore.getState().pendingRings.find((r) => ringNotifId(r.key) === Number(a.notification.id));
+          if (ring) setRinging(ring);
+        });
+      })
+      .catch(() => {});
+    return () => {
+      removed = true;
+      handles.forEach((h) => void h.remove?.());
+    };
+  }, [mounted]);
+
+  // ─── Zangni o'chirish (challenge yechilgach) ───
+  const dismissRing = useCallback((ring: PendingRing) => {
+    const st = useStore.getState();
+    st.removePendingRing(ring.key);
+    void cancelRingNotif(ring.key);
+    // bir martalik budilnik — o'chiriladi
+    if (ring.kind === "alarm" && ring.alarmId && ring.once) {
+      st.updateAlarm(ring.alarmId, { enabled: false });
+    }
+    setRinging(null);
+    // takrorlanuvchi budilnik — keyingi kunni qayta rejalash
+    setTimeout(() => {
+      const cur = useStore.getState();
+      const prev = cur.pendingRings;
+      syncAlarms(cur.alarms, prev)
+        .then((alarmRings) => {
+          const taskRings = prev.filter((r) => r.kind === "task" && !r.key.startsWith("snooze:"));
+          useStore.getState().setPendingRings([...alarmRings, ...taskRings]);
+        })
+        .catch(() => {});
+    }, 400);
+  }, []);
+
+  // ─── Snooze: +N daqiqa — qaytadan chaladi (bildirishnoma ham qayta rejalashadi) ───
+  const snoozeRing = useCallback((ring: PendingRing, min: number) => {
+    const at = new Date(Date.now() + min * 60_000);
+    const sr: PendingRing = {
+      ...ring,
+      key: `snooze:${ring.key}:${at.getTime()}`,
+      at: isoLocal(at),
+      once: true,
+    };
+    const st = useStore.getState();
+    st.removePendingRing(ring.key);
+    st.addPendingRing(sr);
+    void cancelRingNotif(ring.key);
+    void scheduleRingNotif(sr).then((ok) => {
+      if (ok) trackRingNotif(sr.key);
+    });
+    setRinging(null);
+  }, []);
+
   // Birinchi ochilish TOZA (0 ma'lumot) — namuna faqat Sozlamalar'dan qo'lda yuklanadi
 
   const navigate = useCallback(
@@ -109,6 +252,54 @@ export default function Home() {
       return h.slice(0, -1);
     });
   }, []);
+
+  // ─── APK: apparat orqa tugmasi — drawerlar yopiladi → sub-view'dan orqaga → background ───
+  useEffect(() => {
+    if (!inApk()) return;
+    let removed = false;
+    let handle: { remove: () => Promise<void> } | null = null;
+    import("@capacitor/app")
+      .then(({ App }) =>
+        App.addListener("backButton", () => {
+          // Qulf ekranida orqa tugma — hech narsani chetlab o'tib bo'lmaydi
+          if (lockOn && !unlocked) {
+            void App.minimizeApp();
+            return;
+          }
+          // Zang oynasi ochiq — orqa tugma bilan chetlab o'tib bo'lmaydi
+          // (notification ongoing — background'dan qaytganda yana ko'rinadi)
+          if (ringingRef.current) return;
+          // 1) Ochiq drawerlar — avval ular yopiladi
+          if (editorOpen) {
+            setEditorOpen(false);
+            return;
+          }
+          if (aiOpen) {
+            setAiOpen(false);
+            return;
+          }
+          if (missTask) {
+            setMissTask(null);
+            return;
+          }
+          // 2) Asosiy tab — ilova backgroundga (home tugmasi kabi, jarayon saqlanadi)
+          if (NAV.some((n) => n.view === view)) {
+            void App.minimizeApp();
+            return;
+          }
+          // 3) Sub-view — ichki orqaga
+          goBack();
+        })
+      )
+      .then((h) => {
+        if (h && !removed) handle = h as unknown as { remove: () => Promise<void> };
+      })
+      .catch(() => {});
+    return () => {
+      removed = true;
+      void handle?.remove?.();
+    };
+  }, [editorOpen, aiOpen, missTask, view, goBack, lockOn, unlocked]);
 
   const openEditor = useCallback((task?: Task) => {
     setEditorTask(task ?? null);
@@ -214,12 +405,12 @@ export default function Home() {
             <div className="brand-grad mx-4 mt-3 flex items-center gap-3 rounded-2xl px-4 py-3 text-white shadow-lg">
               <Download className="h-5 w-5 shrink-0" />
               <a
-                href="/Universal-Life-OS-v1.4.apk"
-                download="Universal-Life-OS-v1.4.apk"
+                href="/Universal-Life-OS-v1.7.apk"
+                download="Universal-Life-OS-v1.7.apk"
                 className="flex-1 text-[13px] font-semibold leading-tight"
               >
                 {t("app.apkBanner")}
-                <span className="block text-[11px] font-normal opacity-80">Android 7.0+ · 4 MB · bepul</span>
+                <span className="block text-[11px] font-normal opacity-80">Android 7.0+ · 5 MB · bepul</span>
               </a>
               <button onClick={closeApkBanner} aria-label="close" className="rounded-lg p-1 text-white/70 hover:text-white">
                 ✕
@@ -246,6 +437,8 @@ export default function Home() {
                 {view === "finance" && <FinanceView />}
                 {view === "audit" && <AuditView />}
                 {view === "analytics" && <AnalyticsView />}
+                {view === "alarm" && <AlarmView />}
+                {view === "sleep" && <SleepView />}
                 {view === "settings" && <SettingsView />}
                 {view === "more" && <MoreView />}
               </motion.div>
@@ -316,6 +509,11 @@ export default function Home() {
           {editorOpen && <TaskEditorDrawer task={editorTask} onClose={() => setEditorOpen(false)} />}
           <MissSheet task={missTask} onClose={() => setMissTask(null)} />
           <AISheet open={aiOpen} onClose={() => setAiOpen(false)} />
+
+          {/* ─── Zang oynasi — hammasidan ustun ─── */}
+          {ringing && (
+            <RingOverlay ring={ringing} t={t} onDismiss={() => dismissRing(ringing)} onSnooze={(min) => snoozeRing(ringing, min)} />
+          )}
         </main>
       </div>
     </UlosProvider>

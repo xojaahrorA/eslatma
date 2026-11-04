@@ -7,7 +7,7 @@ import { PRIORITY_STYLE, isoLocal } from "@/lib/utils-app";
 import { cn } from "@/lib/utils";
 import type { MissReason, Priority, Repeat, Task } from "@/lib/types";
 import { motion } from "framer-motion";
-import { Trash2, X } from "lucide-react";
+import { AlarmClock, Trash2, X } from "lucide-react";
 
 // ─── Vazifa muharriri — yaratish va tahrirlash ──────────────────────────────
 
@@ -33,6 +33,7 @@ export function TaskEditorDrawer({
   const [tags, setTags] = useState("");
   const [notes, setNotes] = useState("");
   const [repeat, setRepeat] = useState<Repeat>("none");
+  const [alarmLike, setAlarmLike] = useState(false);
 
   useEffect(() => {
     if (task) {
@@ -44,6 +45,7 @@ export function TaskEditorDrawer({
       setTags(task.tags.join(" "));
       setNotes(task.notes ?? "");
       setRepeat(task.repeat);
+      setAlarmLike(!!task.alarmLike);
     } else {
       setTitle("");
       setPriority("medium");
@@ -53,6 +55,7 @@ export function TaskEditorDrawer({
       setTags("");
       setNotes("");
       setRepeat("none");
+      setAlarmLike(false);
     }
   }, [task]);
 
@@ -73,6 +76,8 @@ export function TaskEditorDrawer({
       tags: tags.split(/[\s,]+/).filter(Boolean).map((x) => x.replace(/^#/, "")),
       notes: notes.trim() || undefined,
       repeat,
+      // "budilnik kabi" — faqat vaqt belgilanganda mazmunli
+      alarmLike: time ? alarmLike : false,
     };
     if (task) {
       updateTask(task.id, payload);
@@ -186,6 +191,30 @@ export function TaskEditorDrawer({
             </select>
           </div>
         </div>
+
+        {/* Budilnik kabi signal — vaqt belgilangan bo'lsa */}
+        {time && (
+          <button
+            onClick={() => setAlarmLike(!alarmLike)}
+            className={cn(
+              "mb-4 flex w-full items-start gap-3 rounded-2xl border p-3.5 text-left transition-colors",
+              alarmLike ? "border-rose-500/35 bg-rose-500/[0.07]" : "border-border bg-card"
+            )}
+          >
+            <span className={cn("mt-0.5 rounded-lg p-1.5", alarmLike ? "bg-rose-500/15 text-rose-500" : "bg-muted text-muted-foreground")}>
+              <AlarmClock className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center justify-between gap-2">
+                <span className="text-sm font-bold">{t("ring.taskBadge")}</span>
+                <span className={cn("flex h-5.5 w-10 shrink-0 items-center rounded-full p-0.5 transition-colors", alarmLike ? "bg-rose-500" : "bg-muted-foreground/25")}>
+                  <span className={cn("h-4.5 w-4.5 rounded-full bg-white shadow transition-transform", alarmLike && "translate-x-4")} />
+                </span>
+              </span>
+              <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">{t("alarm.challengeSub")}</span>
+            </span>
+          </button>
+        )}
 
         <textarea
           value={notes}

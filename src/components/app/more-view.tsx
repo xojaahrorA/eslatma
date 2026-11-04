@@ -4,9 +4,11 @@ import { useUlos, SectionCard, Chip } from "./kit";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import {
+  AlarmClock,
   BarChart3,
   ChevronRight,
   Fingerprint,
+  MoonStar,
   NotebookPen,
   Settings2,
   Sparkles,
@@ -29,6 +31,20 @@ export default function MoreView() {
       title: t("more.analytics"),
       sub: t("more.analyticsSub"),
       accent: "bg-cyan-500/12 text-cyan-500",
+    },
+    {
+      view: "alarm",
+      icon: <AlarmClock className="h-5 w-5" />,
+      title: t("more.alarm"),
+      sub: t("more.alarmSub"),
+      accent: "bg-rose-500/12 text-rose-500",
+    },
+    {
+      view: "sleep",
+      icon: <MoonStar className="h-5 w-5" />,
+      title: t("more.sleep"),
+      sub: t("more.sleepSub"),
+      accent: "bg-indigo-500/12 text-indigo-500",
     },
     {
       view: "notes",

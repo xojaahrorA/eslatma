@@ -41,6 +41,8 @@ export type ViewName =
   | "finance"
   | "audit"
   | "analytics"
+  | "alarm"
+  | "sleep"
   | "settings";
 
 export interface UlosCtxValue {

@@ -8,7 +8,7 @@
 
 ## 📥 APK yuklab olish (Android 7.0+)
 
-Repositoriyadagi fayl: **[`apk/Universal-Life-OS-v1.4.apk`](apk/Universal-Life-OS-v1.4.apk)** (≈4 MB)
+Repositoriyadagi fayl: **[`apk/Universal-Life-OS-v1.7.apk`](apk/Universal-Life-OS-v1.7.apk)** (≈4.6 MB)
 
 1. Faylni bosing → **Download** (yoki `Download raw file`)
 2. Telefonda yuklangan faylni oching
@@ -38,6 +38,20 @@ Repositoriyadagi fayl: **[`apk/Universal-Life-OS-v1.4.apk`](apk/Universal-Life-O
 | 🔐 **Ekran qulfi** | PIN kod (4–8 xona) — hash sifatida saqlanadi, 5 xato urinishda 30s blok |
 | 🫆 **Barmoq izi** | BiometricPrompt bilan ochish (Android 9+) — PIN zaxira usul qoladi |
 | 🔑 **O'z AI kaliti (BYOK)** | DeepSeek / Gemini / OpenRouter / Z.ai kaliti bilan APK'da ham bulut AI ishlaydi |
+| 🔔 **Bildirishnomalar** | Vazifa eslatmasi (belgilangan vaqtdan oldin), har kuni odat va ertalabki reja eslatmasi — ilova yopiq turganda ham |
+
+---
+
+## 🔔 Bildirishnomalar
+
+**Sozlamalar → Bildirishnomalar** bo'limida:
+
+- **Vazifa eslatmasi** — vazifa boshlanishidan 5/10/15/30/60 daqiqa oldin xabar beradi
+- **Odat eslatmasi** — har kuni belgilangan vaqtda odatlarni belgilashga eslatadi
+- **Ertalabki reja** — har kuni tongda bugungi rejani eslatadi
+- **Sinov xabari** — tizim ishlashini darhol tekshirish uchun
+
+Barcha eslatmalar **faqat qurilmada** rejalashadi (Android Local Notifications) — hech qanday server yoki push xizmati ishtirok etmaydi. Telefon qayta yoqilganda eslatmalar saqlanib qoladi.
 
 ---
 
@@ -127,8 +141,8 @@ scripts/          # build va ikonka skriptlari
 
 | Qatlam | Holat |
 |---|---|
-| Ruxsatlar | Faqat `INTERNET` — hech qanday ortiqcha ruxsat yo'q |
-| Tarmoq | APK **100% offline** — hech qanday tashqi so'rov yubormaydi |
+| Ruxsatlar | `INTERNET`, `POST_NOTIFICATIONS` va eslatma ruxsatlari — boshqa hech narsa yo'q |
+| Tarmoq | APK **100% offline** — AI kalit ulagandagina tanlangan provayderga so'rov ketadi |
 | Ekran qulfi | PIN (4–8 xona), **SHA-256 hash** sifatida saqlanadi — ochiq matn yo'q |
 | Brute-force | 5 marta xato → **30 soniya** kutish rejimi |
 | Avto-qulf | Ilovani fonaga yuborsangiz — qaytganda PIN so'raladi |

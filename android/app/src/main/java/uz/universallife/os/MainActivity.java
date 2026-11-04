@@ -10,6 +10,8 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
         // Barmoq izi / yuz bilan ochish plagini (BiometricPrompt)
         registerPlugin(BiometricPlugin.class);
+        // Uyqu kuzatuvi: akselerometr Foreground Service (mahalliy, oflayn)
+        registerPlugin(SleepSensorPlugin.class);
     }
 
     @Override

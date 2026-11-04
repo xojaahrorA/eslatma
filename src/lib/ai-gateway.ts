@@ -162,6 +162,8 @@ export const byokReady = (s: {
 
 /**
  * OpenAI-mos chat/completions chaqiruvi (mijozdan to'g'ridan-to'g'ri).
+ * APK'da native HTTP (CapacitorHttp) ishlatiladi — CORS cheklovlari umuman
+ * qo'llanmaydi, istalgan provayder ulanadi. Saytda oddiy fetch.
  * Kalit hech qanday logga yozilmaydi; xato faqat matn sifatida qaytadi.
  */
 export async function callByok(opts: {
@@ -170,8 +172,38 @@ export async function callByok(opts: {
   apiKey: string;
   messages: { role: string; content: string }[];
 }): Promise<{ ok: true; content: string } | { ok: false; error: string }> {
+  const url = `${opts.baseUrl.replace(/\/+$/, "")}/chat/completions`;
   try {
-    const url = `${opts.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+    // @capacitor/core faqat brauzer/APKda yuklanadi (SSR-safe dynamic import)
+    const { Capacitor, CapacitorHttp } = await import("@capacitor/core");
+    const native =
+      typeof window !== "undefined" && "Capacitor" in window && Capacitor.isNativePlatform();
+    if (native) {
+      // APK: native HTTP ko'prik — CORS o'rnashmasiz, to'g'ridan-to'g'ri provayderga
+      const res = await CapacitorHttp.post({
+        url,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${opts.apiKey}`,
+        },
+        data: { model: opts.model, messages: opts.messages, temperature: 0.2 },
+        readTimeout: 60_000,
+        connectTimeout: 15_000,
+      });
+      if (res.status < 200 || res.status >= 300) {
+        const t = typeof res.data === "string" ? res.data : JSON.stringify(res.data ?? {});
+        return { ok: false, error: `HTTP ${res.status}${t ? `: ${t.slice(0, 140)}` : ""}` };
+      }
+      const data = typeof res.data === "string" ? safeParse(res.data) : res.data;
+      const content: string =
+        (data as Record<string, unknown>)?.choices?.[0]?.message?.content ??
+        (data as Record<string, unknown>)?.choices?.[0]?.text ??
+        "";
+      if (!content) return { ok: false, error: "empty_response" };
+      return { ok: true, content };
+    }
+
+    // Sayt: oddiy fetch (ruxsat etilgan CORS bilan)
     const res = await fetch(url, {
       method: "POST",
       headers: {
@@ -197,5 +229,13 @@ export async function callByok(opts: {
     return { ok: true, content };
   } catch (e) {
     return { ok: false, error: String((e as Error)?.message ?? e) };
+  }
+}
+
+function safeParse(s: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
   }
 }

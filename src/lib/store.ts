@@ -6,13 +6,16 @@ import { chainHash, dateKey, pad2, uuidv7 } from "./utils-app";
 import type {
   AIProposal,
   AIRecord,
+  Alarm,
   Expense,
   FinanceCategory,
   Goal,
   Habit,
   HabitLog,
   Note,
+  PendingRing,
   Settings,
+  SleepSession,
   Snapshot,
   Task,
   TimeEntry,
@@ -34,6 +37,10 @@ export const DEFAULT_SETTINGS: Settings = {
   lockPinHash: null,
   lockPinLen: null,
   lockBiometric: false,
+  notifTasks: true,
+  notifBeforeMin: 15,
+  notifHabitTime: null,
+  notifMorningTime: null,
   seeded: false,
 };
 
@@ -53,6 +60,14 @@ interface StoreState {
   aiUsageDate: string;
   aiUsageCount: number;
   settings: Settings;
+
+  // budilnik + uyqu (PRD 4.7 qo'shimchasi)
+  alarms: Alarm[];
+  sleepSessions: SleepSession[];
+  /** Hozir davom etayotgan uyqu sessiyasi (null = yo'q) */
+  sleepActive: { id: string; start: string; sensor: boolean } | null;
+  /** Zang vaqti kutilayotgan signal'lar (budilnik va 'budilnik kabi' eslatmalar) */
+  pendingRings: PendingRing[];
 
   // vazifalar
   addTask: (t: Partial<Task> & { title: string }) => Task;
@@ -92,10 +107,27 @@ interface StoreState {
   // sozlamalar
   setSettings: (patch: Partial<Settings>) => void;
 
+  // budilnik
+  addAlarm: (a: Partial<Alarm> & { time: string }) => Alarm;
+  updateAlarm: (id: string, patch: Partial<Alarm>) => void;
+  deleteAlarm: (id: string) => void;
+
+  // uyqu
+  addSleepSession: (s: SleepSession) => void;
+  deleteSleepSession: (id: string) => void;
+  setSleepActive: (a: { id: string; start: string; sensor: boolean } | null) => void;
+
+  // zang (signal) navbati
+  setPendingRings: (rings: PendingRing[]) => void;
+  addPendingRing: (r: PendingRing) => void;
+  removePendingRing: (key: string) => void;
+
   // ma'lumot egaligi
   snapshot: () => Snapshot;
   restore: (s: Snapshot) => void;
   exportAll: () => string;
+  /** Zaxira JSON fayldan to'liq tiklash. natija: ok=false bo'lsa fayl tanib olinmagan */
+  importAll: (raw: string) => { ok: boolean; counts?: string };
   wipeAll: () => void;
   seedDemo: () => void;
 }
@@ -114,6 +146,11 @@ export const useStore = create<StoreState>()(
       aiUsageDate: dateKey(new Date()),
       aiUsageCount: 0,
       settings: DEFAULT_SETTINGS,
+
+      alarms: [],
+      sleepSessions: [],
+      sleepActive: null,
+      pendingRings: [],
 
       addTask: (t) => {
         const task: Task = {
@@ -288,6 +325,48 @@ export const useStore = create<StoreState>()(
 
       setSettings: (patch) => set((s) => ({ settings: { ...s.settings, ...patch } })),
 
+      // ─── Budilnik ───
+      addAlarm: (a) => {
+        const alarm: Alarm = {
+          id: uuidv7(),
+          time: a.time,
+          days: a.days ?? [],
+          label: a.label,
+          enabled: a.enabled ?? true,
+          challenge: a.challenge ?? true,
+          createdAt: new Date().toISOString(),
+        };
+        set((s) => ({ alarms: [...s.alarms, alarm] }));
+        return alarm;
+      },
+      updateAlarm: (id, patch) =>
+        set((s) => ({ alarms: s.alarms.map((a) => (a.id === id ? { ...a, ...patch } : a)) })),
+      deleteAlarm: (id) =>
+        set((s) => ({
+          alarms: s.alarms.filter((a) => a.id !== id),
+          // shu budilnikning kutilayotgan zangi ham olib tashlanadi
+          pendingRings: s.pendingRings.filter((r) => r.alarmId !== id),
+        })),
+
+      // ─── Uyqu ───
+      addSleepSession: (sess) =>
+        set((s) => ({
+          sleepSessions: [...s.sleepSessions, sess],
+          sleepActive: null,
+        })),
+      deleteSleepSession: (id) =>
+        set((s) => ({ sleepSessions: s.sleepSessions.filter((x) => x.id !== id) })),
+      setSleepActive: (a) => set({ sleepActive: a }),
+
+      // ─── Zang navbati ───
+      setPendingRings: (rings) => set({ pendingRings: rings }),
+      addPendingRing: (r) =>
+        set((s) => ({
+          pendingRings: [...s.pendingRings.filter((x) => x.key !== r.key), r],
+        })),
+      removePendingRing: (key) =>
+        set((s) => ({ pendingRings: s.pendingRings.filter((r) => r.key !== key) })),
+
       snapshot: () => {
         const s = get();
         return {
@@ -297,6 +376,7 @@ export const useStore = create<StoreState>()(
           goals: s.goals,
           notes: s.notes,
           expenses: s.expenses,
+          timeEntries: s.timeEntries,
         };
       },
       restore: (snap) => set({ ...snap }),
@@ -314,8 +394,10 @@ export const useStore = create<StoreState>()(
             notes: s.notes,
             expenses: s.expenses,
             timeEntries: s.timeEntries,
-            aiRecords: s.aiRecords,
+            alarms: s.alarms,
+            sleepSessions: s.sleepSessions,
             // AI kaliti (BYOK) eksportga KIRMAYDI — faqat qurilmada qoladi (PRD 8.3)
+            // sleepActive / pendingRings — vaqtinchalik holat, eksportga kirmaydi
             settings: { ...s.settings, aiKey: undefined },
           },
           null,
@@ -333,8 +415,69 @@ export const useStore = create<StoreState>()(
           timeEntries: [],
           aiRecords: [],
           aiUsageCount: 0,
+          alarms: [],
+          sleepSessions: [],
+          sleepActive: null,
+          pendingRings: [],
           settings: { ...get().settings, seeded: true },
         }),
+      /** Zaxira fayldan tiklash: validatsiya + maxfiy maydonlar (AI kaliti, PIN) hech qachon tiklanmaydi */
+      importAll: (raw) => {
+        let j: Record<string, unknown>;
+        try {
+          j = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          return { ok: false };
+        }
+        if (!j || typeof j !== "object") return { ok: false };
+        const arr = (k: string): unknown[] | undefined =>
+          Array.isArray(j[k]) ? (j[k] as unknown[]) : undefined;
+        const tasks = arr("tasks");
+        const habits = arr("habits");
+        const habitLogs = arr("habitLogs");
+        const goals = arr("goals");
+        const notes = arr("notes");
+        const expenses = arr("expenses");
+        const timeEntries = arr("timeEntries");
+        const aiRecords = arr("aiRecords");
+        const alarms = arr("alarms");
+        const sleepSessions = arr("sleepSessions");
+        // Hech bitta ma'lumot massivi tanilmadi — bu Life OS zaxirasi emas
+        if (!tasks && !habits && !goals && !notes && !expenses) return { ok: false };
+
+        const st = (j.settings ?? {}) as Partial<Settings>;
+        // Maxfiylik: AI kaliti va qulf PIN zaxiradan qaytmaydi (qurilmanda qoladi)
+        const safe = { ...st } as Record<string, unknown>;
+        delete safe.aiKey;
+        delete safe.aiProvider;
+        delete safe.aiBaseUrl;
+        delete safe.aiModel;
+        delete safe.lockPinHash;
+        delete safe.lockEnabled;
+        delete safe.lockPinLen;
+        delete safe.lockBiometric;
+
+        const n = (a: unknown[] | undefined) => (a ? String(a.length) : "0");
+        set({
+          tasks: (tasks as Task[]) ?? [],
+          habits: (habits as Habit[]) ?? [],
+          habitLogs: (habitLogs as HabitLog[]) ?? [],
+          goals: (goals as Goal[]) ?? [],
+          notes: (notes as Note[]) ?? [],
+          expenses: (expenses as Expense[]) ?? [],
+          timeEntries: (timeEntries as TimeEntry[]) ?? [],
+          aiRecords: (aiRecords as AIRecord[]) ?? [],
+          alarms: (alarms as Alarm[]) ?? [],
+          sleepSessions: (sleepSessions as SleepSession[]) ?? [],
+          sleepActive: null,
+          pendingRings: [],
+          settings: { ...get().settings, ...(safe as Partial<Settings>), seeded: true },
+        });
+        return {
+          ok: true,
+          counts: `${n(tasks)}+${n(goals)}+${n(notes)}+${n(expenses)}`,
+        };
+      },
       seedDemo: () => seed(set, get),
     }),
     {

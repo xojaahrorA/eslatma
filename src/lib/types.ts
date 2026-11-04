@@ -23,6 +23,75 @@ export type FontScale = "small" | "normal" | "large";
 export type TaskSource = "user" | "ai" | "t0" | "import";
 export type Repeat = "none" | "daily" | "weekdays" | "weekly" | "every3d";
 
+/**
+ * Budilnik — mahalliy, oflayn. time = "HH:mm" (floating),
+ * days: 0=yakshanba … 6=shanba; bo'sh massiv = bir marta.
+ * challenge=true bo'lsa — o'chirish uchun matematik topshiriq yechiladi
+ * (bosib o'chib bo'lmaydi — PRD talabi: bajargandan keyin o'chadi).
+ */
+export interface Alarm {
+  id: string;
+  time: string; // "HH:mm"
+  days: number[];
+  label?: string;
+  enabled: boolean;
+  challenge: boolean;
+  createdAt: string;
+}
+
+/** Uyqu sessiyasi — to'liq qurilmada saqlanadi */
+export interface SleepSession {
+  id: string;
+  start: string; // ISO mahalliy
+  end: string;   // ISO mahalliy
+  /** Uxlashga ketgan vaqt (daqiqa) — qo'lda yoki taxminiy */
+  latencyMin?: number;
+  /** Tunda uyg'onishlar soni (qo'lda) */
+  wakings?: number;
+  /** Foydalanuvchi bahosi 1..5 */
+  quality?: number;
+  /** Har daqiqalik harakat indeksi 0..100 (sensor rejimi) — ixchiroiy */
+  motion?: number[];
+  /** Akselerometr sensori bilan yig'ilganmi */
+  sensor?: boolean;
+  /** Tahlil natijasi (daqiqalarda) */
+  stages?: SleepStages;
+  /** Uyqu ballari 0..100 */
+  score?: number;
+  note?: string;
+}
+
+export interface SleepStages {
+  deep: number;
+  light: number;
+  rem: number;
+  awake: number;
+}
+
+/**
+ * Zang vaqti kutilayotgan yoki kelgan signal.
+ * key: "alarm:{alarmId}:{atTs}" yoki "task:{taskId}:{atTs}"
+ */
+export interface PendingRing {
+  key: string;
+  kind: "alarm" | "task";
+  title: string;
+  /** Qo'shimcha matn (masalan, aniq vaqt) */
+  body?: string;
+  /** ISO mahalliy — signal chalinadigan vaqt */
+  at: string;
+  /** O'chirish uchun topshiriq kerakmi */
+  challenge: boolean;
+  /** Bir marta (takrorlanmaydigan budilnik) — o'chirilganda disable bo'ladi */
+  once?: boolean;
+  /** Qaysi budilnik (kind=alarm) */
+  alarmId?: string;
+  /** Takrorlanish kunlari (kind=alarm) — keyingi jadval uchun */
+  days?: number[];
+  /** Budilnik vaqti "HH:mm" (keyingi jadval uchun) */
+  time?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -42,6 +111,8 @@ export interface Task {
   source: TaskSource;
   /** AI taklifini qabul qilganda qaysi ma'lumot asosida yaratilgani (shaffoflik) */
   evidence?: string[];
+  /** Budilnik kabi signal: to'liq ovoz + o'chirmaslik uchun topshiriq (PRD 4.7) */
+  alarmLike?: boolean;
 }
 
 export interface Habit {
@@ -179,6 +250,21 @@ export interface Settings {
   aiBaseUrl?: string;
   aiModel?: string;
   aiKey?: string;
+  /** Bildirishnomalar — lokal eslatmalar (faqat qurilmada rejalashadi) */
+  notifTasks?: boolean;
+  /** Vazifa boshlanishidan oldin necha daqiqa xabar berish */
+  notifBeforeMin?: number;
+  /** Har kuni odatlarni belgilash eslatmasi — "HH:mm" yoki null */
+  notifHabitTime?: string | null;
+  /** Har kuni ertalabki reja eslatmasi — "HH:mm" yoki null */
+  notifMorningTime?: string | null;
+  // ─── Uyqu (PRD 4.7 qo'shimchasi) ───
+  /** Kunlik uyqu maqsadi (soat) — tahlil va qarz hisobi uchun */
+  sleepGoalH?: number;
+  /** Yotish eslatmasi — "HH:mm" yoki null */
+  sleepBedtime?: string | null;
+  /** Yotish eslatmasi oldidan ogohlantirish (daqiqa) */
+  sleepWindMin?: number;
   seeded?: boolean;
 }
 
@@ -189,6 +275,7 @@ export interface Snapshot {
   goals: Goal[];
   notes: Note[];
   expenses: Expense[];
+  timeEntries?: TimeEntry[];
 }
 
 /** T0 dvigateli natijasi — AI'siz tezkor kiritish tahlili (PRD 5.2 / 4.1) */

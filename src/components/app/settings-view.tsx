@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useStore } from "@/lib/store";
 import { useUlos, SectionCard, Chip } from "./kit";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,8 @@ import { sha256Hex } from "./lock-screen";
 import PinField from "./pin-field";
 import { biometricAvailable } from "@/lib/biometric";
 import { PROVIDERS, byokReady, callByok } from "@/lib/ai-gateway";
+import { notifPermission, notifAsk, notifTestNow, syncNotifs } from "@/lib/notify";
+import type { NotifPerm } from "@/lib/notify";
 import type { ExperienceLevel, FontScale, Lang, ThemeMode } from "@/lib/types";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -32,9 +34,13 @@ import {
   ShieldOff,
   Sparkles,
   Sun,
+  Bell,
+  CalendarClock,
+  Sunrise,
   Timer,
   Trash2,
   Type,
+  Upload,
   Wallet,
   Zap,
 } from "lucide-react";
@@ -90,7 +96,9 @@ export default function SettingsView() {
   const { t } = useUlos();
   const settings = useStore((s) => s.settings);
   const setSettings = useStore((s) => s.setSettings);
+  const tasks = useStore((s) => s.tasks);
   const exportAll = useStore((s) => s.exportAll);
+  const importAll = useStore((s) => s.importAll);
   const wipeAll = useStore((s) => s.wipeAll);
   const seedDemo = useStore((s) => s.seedDemo);
 
@@ -154,6 +162,39 @@ export default function SettingsView() {
   const toggleBiometric = (v: boolean) => {
     setSettings({ lockBiometric: v });
     import("sonner").then(({ toast }) => toast(v ? t("sec.biometricSaved") : t("sec.biometricOff")));
+  };
+
+  // ─── Bildirishnomalar (lokal eslatmalar) ───
+  const [notifPerm, setNotifPerm] = useState<NotifPerm>("prompt");
+  const notifLabels = () => ({
+    habitTitle: t("notif.habitTitle"),
+    habitBody: t("notif.habitBody"),
+    morningTitle: t("notif.morningTitle"),
+    morningBody: t("notif.morningBody"),
+  });
+  useEffect(() => {
+    let alive = true;
+    notifPermission().then((p) => alive && setNotifPerm(p));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const askNotif = async () => {
+    const ok = await notifAsk();
+    setNotifPerm(ok ? "granted" : "denied");
+    if (ok) {
+      await syncNotifs(tasks, settings, notifLabels());
+      import("sonner").then(({ toast }) => toast.success(t("set.notifPermOk")));
+    } else {
+      import("sonner").then(({ toast }) => toast.error(t("set.notifDenied")));
+    }
+  };
+
+  const testNotif = async () => {
+    const ok = await notifTestNow("Universal Life OS", t("set.notifTestSub"));
+    if (ok) import("sonner").then(({ toast }) => toast(t("set.notifTestSent")));
+    else import("sonner").then(({ toast }) => toast.error(t("set.notifDenied")));
   };
 
   // ─── O'z AI kaliti (BYOK) ───
@@ -239,6 +280,23 @@ export default function SettingsView() {
     a.click();
     URL.revokeObjectURL(url);
     import("sonner").then(({ toast }) => toast.success(t("set.exported")));
+  };
+
+  // ─── Zaxiradan tiklash (import) ───
+  const [importConfirm, setImportConfirm] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const onImportFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    void f.text().then((raw) => {
+      const r = importAll(raw);
+      import("sonner").then(({ toast }) => {
+        if (r.ok) toast.success(t("set.imported"));
+        else toast.error(t("set.importBad"));
+      });
+    });
   };
 
   return (
@@ -601,6 +659,144 @@ export default function SettingsView() {
         <p className="mt-2 text-[10px] leading-snug text-muted-foreground">{t("fin.budgetSub")}</p>
       </SectionCard>
 
+      {/* ─── Bildirishnomalar: lokal eslatmalar (APK'da ilova yopiq turganda ham) ─── */}
+      <SectionCard>
+        <div className="mb-1 flex items-center gap-2">
+          <Bell className="h-4 w-4 text-amber-500" />
+          <h3 className="text-sm font-bold">{t("set.notif")}</h3>
+        </div>
+        <p className="mb-3 text-[11px] leading-snug text-muted-foreground">{t("set.notifSub")}</p>
+
+        {/* Ruxsat holati */}
+        <div className="mb-3 flex items-center gap-2 rounded-xl bg-muted/60 p-2.5">
+          <span
+            className={cn(
+              "flex-1 rounded-lg px-2 py-1 text-[11px] font-bold",
+              notifPerm === "granted"
+                ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+            )}
+          >
+            {notifPerm === "granted" ? `✓ ${t("set.notifPermOk")}` : t("set.notifPermNeed")}
+          </span>
+          {notifPerm !== "granted" && (
+            <button
+              onClick={askNotif}
+              className="brand-grad rounded-lg px-3 py-1.5 text-[11px] font-bold text-white active:scale-95 transition"
+            >
+              {t("set.notifAllow")}
+            </button>
+          )}
+        </div>
+
+        {/* Vazifa eslatmasi */}
+        <div className="flex items-center gap-3">
+          <span className="rounded-xl bg-cyan-500/10 p-2 text-cyan-500">
+            <CalendarClock className="h-4 w-4" />
+          </span>
+          <div className="flex-1">
+            <p className="text-xs font-bold">{t("set.notifTasks")}</p>
+            <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+              {t("set.notifTasksSub", { n: settings.notifBeforeMin ?? 15 })}
+            </p>
+          </div>
+          <Switch
+            checked={!!settings.notifTasks}
+            onCheckedChange={(v) => setSettings({ notifTasks: v })}
+          />
+        </div>
+
+        {/* Oldindan xabar: necha daqiqa */}
+        {!!settings.notifTasks && (
+          <div className="mt-2 pl-11">
+            <p className="mb-1.5 text-[10px] font-semibold text-muted-foreground">{t("set.notifBefore")}</p>
+            <div className="flex gap-1.5">
+              {[5, 10, 15, 30, 60].map((m) => (
+                <button
+                  key={m}
+                  onClick={() => setSettings({ notifBeforeMin: m })}
+                  className={cn(
+                    "flex-1 rounded-lg px-1 py-1.5 text-[11px] font-bold tabular-nums transition active:scale-95",
+                    (settings.notifBeforeMin ?? 15) === m
+                      ? "brand-grad text-white"
+                      : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {m}′
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Odat eslatmasi */}
+        <div className="mt-3 flex items-center gap-3 border-t border-border/50 pt-3">
+          <span className="rounded-xl bg-orange-500/10 p-2 text-orange-500">
+            <Timer className="h-4 w-4" />
+          </span>
+          <div className="flex-1">
+            <p className="text-xs font-bold">{t("set.notifHabit")}</p>
+            <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{t("set.notifHabitSub")}</p>
+          </div>
+          <Switch
+            checked={!!settings.notifHabitTime}
+            onCheckedChange={(v) => setSettings({ notifHabitTime: v ? (settings.notifHabitTime ?? "20:00") : null })}
+          />
+        </div>
+        {!!settings.notifHabitTime && (
+          <div className="mt-2 flex items-center gap-2 pl-11">
+            <span className="text-[10px] font-semibold text-muted-foreground">{t("set.notifTime")}</span>
+            <input
+              type="time"
+              value={settings.notifHabitTime}
+              onChange={(e) => setSettings({ notifHabitTime: e.target.value || null })}
+              className="rounded-lg bg-muted px-2.5 py-1.5 text-sm font-bold tabular-nums outline-none"
+            />
+          </div>
+        )}
+
+        {/* Ertalabki reja */}
+        <div className="mt-3 flex items-center gap-3 border-t border-border/50 pt-3">
+          <span className="rounded-xl bg-violet-500/10 p-2 text-violet-500">
+            <Sunrise className="h-4 w-4" />
+          </span>
+          <div className="flex-1">
+            <p className="text-xs font-bold">{t("set.notifMorning")}</p>
+            <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">{t("set.notifMorningSub")}</p>
+          </div>
+          <Switch
+            checked={!!settings.notifMorningTime}
+            onCheckedChange={(v) => setSettings({ notifMorningTime: v ? (settings.notifMorningTime ?? "08:00") : null })}
+          />
+        </div>
+        {!!settings.notifMorningTime && (
+          <div className="mt-2 flex items-center gap-2 pl-11">
+            <span className="text-[10px] font-semibold text-muted-foreground">{t("set.notifTime")}</span>
+            <input
+              type="time"
+              value={settings.notifMorningTime}
+              onChange={(e) => setSettings({ notifMorningTime: e.target.value || null })}
+              className="rounded-lg bg-muted px-2.5 py-1.5 text-sm font-bold tabular-nums outline-none"
+            />
+          </div>
+        )}
+
+        {/* Sinov xabari */}
+        <button
+          onClick={testNotif}
+          disabled={notifPerm !== "granted"}
+          className={cn(
+            "mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-border/70 py-2.5 text-xs font-bold transition active:scale-[0.98]",
+            notifPerm === "granted" ? "text-foreground" : "text-muted-foreground/50"
+          )}
+        >
+          <Bell className="h-3.5 w-3.5" />
+          {t("set.notifTest")}
+        </button>
+        <p className="mt-1.5 text-center text-[10px] leading-snug text-muted-foreground">{t("set.notifTestSub")}</p>
+        <p className="mt-2 text-[10px] leading-snug text-muted-foreground">{t("set.notifWebNote")}</p>
+      </SectionCard>
+
       {/* ─── Pomodoro vaqtlari — «Oddiy» darajada yashiriladi (soddalashtirish) ─── */}
       {LEVEL_RANK[settings.level] >= LEVEL_RANK.active && (
         <SectionCard>
@@ -799,6 +995,41 @@ export default function SettingsView() {
             <p className="text-[10px] text-muted-foreground">{t("set.exportSub")}</p>
           </div>
         </button>
+        <AlertDialog open={importConfirm} onOpenChange={setImportConfirm}>
+          <AlertDialogTrigger asChild>
+            <button className="mt-1.5 flex w-full items-center gap-3 rounded-2xl bg-muted/60 p-3 text-left transition-colors hover:bg-muted">
+              <span className="rounded-xl bg-teal-500/10 p-2 text-teal-500">
+                <Upload className="h-4 w-4" />
+              </span>
+              <div className="flex-1">
+                <p className="text-xs font-bold">{t("set.import")}</p>
+                <p className="text-[10px] text-muted-foreground">{t("set.importSub")}</p>
+              </div>
+            </button>
+          </AlertDialogTrigger>
+          <AlertDialogContent className="max-w-[340px] rounded-3xl">
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("set.importTitle")}</AlertDialogTitle>
+              <AlertDialogDescription>{t("set.importBody")}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel className="rounded-xl">{t("common.cancel")}</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => fileRef.current?.click()}
+                className="rounded-xl bg-teal-600 text-white hover:bg-teal-700"
+              >
+                {t("set.importPick")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={onImportFile}
+        />
         <button
           onClick={() => {
             seedDemo();
@@ -871,7 +1102,7 @@ export default function SettingsView() {
             </Chip>
           ))}
         </div>
-        <p className="mt-3 text-[10px] text-muted-foreground/60">Universal Life OS · v1.0 · PRD v2.0</p>
+        <p className="mt-3 text-[10px] text-muted-foreground/60">Universal Life OS · v1.7 · PRD v2.0</p>
       </SectionCard>
     </div>
   );

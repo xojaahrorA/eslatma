@@ -4,4 +4,10 @@
     <string name="title_activity_main">Life OS</string>
     <string name="package_name">uz.universallife.os</string>
     <string name="custom_url_scheme">uz.universallife.os</string>
+    <!-- Uyqu kuzatuvi servisi -->
+    <string name="sleep_tracking_title">Uyqu kuzatuvi</string>
+    <string name="sleep_tracking_active">Harakatlar yozilmoqda…</string>
+    <string name="sleep_tracking_elapsed">Uyqu: %1$d daqiqa</string>
+    <string name="sleep_channel_name">Uyqu kuzatuvi</string>
+    <string name="sleep_channel_desc">Uyqu sessiyasi davomida fon yozuvi holati</string>
 </resources>
