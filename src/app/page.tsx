@@ -193,11 +193,15 @@ export default function Home() {
     };
   }, [mounted]);
 
-  // ─── Zangni o'chirish (challenge yechilgach) ───
+  // ─── Zangni o'chirish (barcha missiyalar bajarilgach) ───
   const dismissRing = useCallback((ring: PendingRing) => {
     const st = useStore.getState();
     st.removePendingRing(ring.key);
     void cancelRingNotif(ring.key);
+    // uyg'onish statistikasi — avtomatik yig'iladi (v1.8)
+    if (ring.kind === "alarm" && ring.alarmId) {
+      st.logRingOutcome(ring.alarmId, "win");
+    }
     // bir martalik budilnik — o'chiriladi
     if (ring.kind === "alarm" && ring.alarmId && ring.once) {
       st.updateAlarm(ring.alarmId, { enabled: false });
@@ -216,16 +220,22 @@ export default function Home() {
     }, 400);
   }, []);
 
-  // ─── Snooze: +N daqiqa — qaytadan chaladi (bildirishnoma ham qayta rejalashadi) ───
+  // ─── Snooze: +N daqiqa — cheklov budilnikdan keladi (v1.8) ───
   const snoozeRing = useCallback((ring: PendingRing, min: number) => {
     const at = new Date(Date.now() + min * 60_000);
+    const used = (ring.snoozeUsed ?? 0) + 1;
     const sr: PendingRing = {
       ...ring,
       key: `snooze:${ring.key}:${at.getTime()}`,
       at: isoLocal(at),
       once: true,
+      snoozeUsed: used,
     };
     const st = useStore.getState();
+    // statistika: snooze — zanjirni buzadi (moslashuvchan qiyinlik buni ko'radi)
+    if (ring.kind === "alarm" && ring.alarmId) {
+      st.logRingOutcome(ring.alarmId, "snooze", 1);
+    }
     st.removePendingRing(ring.key);
     st.addPendingRing(sr);
     void cancelRingNotif(ring.key);
@@ -405,8 +415,8 @@ export default function Home() {
             <div className="brand-grad mx-4 mt-3 flex items-center gap-3 rounded-2xl px-4 py-3 text-white shadow-lg">
               <Download className="h-5 w-5 shrink-0" />
               <a
-                href="/Universal-Life-OS-v1.7.apk"
-                download="Universal-Life-OS-v1.7.apk"
+                href="/Universal-Life-OS-v1.8.apk"
+                download="Universal-Life-OS-v1.8.apk"
                 className="flex-1 text-[13px] font-semibold leading-tight"
               >
                 {t("app.apkBanner")}

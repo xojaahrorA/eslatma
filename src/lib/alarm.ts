@@ -177,16 +177,26 @@ export async function syncAlarms(alarms: Alarm[], existing: PendingRing[]): Prom
         atTs(r) > now &&
         r.time === a.time
     );
+    // Zang sozlamalari (missiyalar, qiyinlik, snooze) budilnikdan doim yangilanadi
+    const fields = {
+      challenge: a.challenge,
+      missions: a.missions && a.missions.length ? a.missions : a.challenge ? ["math" as const] : [],
+      difficulty: a.difficulty ?? ("medium" as const),
+      smart: a.smart ?? false,
+      snoozeLimit: a.snoozeLimit ?? null,
+      snoozeMin: a.snoozeMin ?? 5,
+    };
     const ring: PendingRing =
-      same ??
-      {
+      same
+        ? { ...same, ...fields }
+        : {
         key: ringKey("alarm", a.id, at),
         kind: "alarm",
         alarmId: a.id,
         title: a.label?.trim() || a.time,
         body: `⏰ ${pad2(at.getHours())}:${pad2(at.getMinutes())}`,
         at: isoLocal(at),
-        challenge: a.challenge,
+        ...fields,
         once: a.days.length === 0,
         days: a.days,
         time: a.time,

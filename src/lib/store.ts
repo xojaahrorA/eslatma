@@ -7,6 +7,7 @@ import type {
   AIProposal,
   AIRecord,
   Alarm,
+  AlarmStat,
   Expense,
   FinanceCategory,
   Goal,
@@ -63,6 +64,8 @@ interface StoreState {
 
   // budilnik + uyqu (PRD 4.7 qo'shimchasi)
   alarms: Alarm[];
+  /** Budilnik bo'yicha uyg'onish statistikasi — zang natijasidan avtomatik yig'iladi (v1.8) */
+  alarmStats: Record<string, AlarmStat>;
   sleepSessions: SleepSession[];
   /** Hozir davom etayotgan uyqu sessiyasi (null = yo'q) */
   sleepActive: { id: string; start: string; sensor: boolean } | null;
@@ -111,6 +114,8 @@ interface StoreState {
   addAlarm: (a: Partial<Alarm> & { time: string }) => Alarm;
   updateAlarm: (id: string, patch: Partial<Alarm>) => void;
   deleteAlarm: (id: string) => void;
+  /** Zang natijasini avtomatik yozish: win = missiya bajarib o'z vaqtida, snooze = kechiktirdi */
+  logRingOutcome: (alarmId: string, outcome: "win" | "snooze", snoozes?: number) => void;
 
   // uyqu
   addSleepSession: (s: SleepSession) => void;
@@ -148,6 +153,7 @@ export const useStore = create<StoreState>()(
       settings: DEFAULT_SETTINGS,
 
       alarms: [],
+      alarmStats: {},
       sleepSessions: [],
       sleepActive: null,
       pendingRings: [],
@@ -334,6 +340,12 @@ export const useStore = create<StoreState>()(
           label: a.label,
           enabled: a.enabled ?? true,
           challenge: a.challenge ?? true,
+          missions: a.missions ?? (a.challenge === false ? [] : ["math"]),
+          difficulty: a.difficulty ?? "medium",
+          smart: a.smart ?? false,
+          snoozeLimit: a.snoozeLimit ?? null,
+          snoozeMin: a.snoozeMin ?? 5,
+          gentle: a.gentle ?? false,
           createdAt: new Date().toISOString(),
         };
         set((s) => ({ alarms: [...s.alarms, alarm] }));
@@ -347,6 +359,19 @@ export const useStore = create<StoreState>()(
           // shu budilnikning kutilayotgan zangi ham olib tashlanadi
           pendingRings: s.pendingRings.filter((r) => r.alarmId !== id),
         })),
+      logRingOutcome: (alarmId, outcome, snoozes) =>
+        set((s) => {
+          const prev = s.alarmStats[alarmId] ?? { streak: 0, total: 0, snoozes: 0, last: "win", lastAt: "" };
+          const win = outcome === "win";
+          const next: AlarmStat = {
+            streak: win ? prev.streak + 1 : 0,
+            total: prev.total + 1,
+            snoozes: prev.snoozes + (snoozes ?? 0),
+            last: outcome,
+            lastAt: new Date().toISOString(),
+          };
+          return { alarmStats: { ...s.alarmStats, [alarmId]: next } };
+        }),
 
       // ─── Uyqu ───
       addSleepSession: (sess) =>
@@ -395,6 +420,7 @@ export const useStore = create<StoreState>()(
             expenses: s.expenses,
             timeEntries: s.timeEntries,
             alarms: s.alarms,
+            alarmStats: s.alarmStats,
             sleepSessions: s.sleepSessions,
             // AI kaliti (BYOK) eksportga KIRMAYDI — faqat qurilmada qoladi (PRD 8.3)
             // sleepActive / pendingRings — vaqtinchalik holat, eksportga kirmaydi
@@ -416,6 +442,7 @@ export const useStore = create<StoreState>()(
           aiRecords: [],
           aiUsageCount: 0,
           alarms: [],
+          alarmStats: {},
           sleepSessions: [],
           sleepActive: null,
           pendingRings: [],
@@ -442,6 +469,12 @@ export const useStore = create<StoreState>()(
         const aiRecords = arr("aiRecords");
         const alarms = arr("alarms");
         const sleepSessions = arr("sleepSessions");
+        // alarmStats — obyekt ko'rinishida (Record<string, AlarmStat>)
+        const stRaw = j.alarmStats;
+        const alarmStats =
+          stRaw && typeof stRaw === "object" && !Array.isArray(stRaw)
+            ? (stRaw as Record<string, AlarmStat>)
+            : undefined;
         // Hech bitta ma'lumot massivi tanilmadi — bu Life OS zaxirasi emas
         if (!tasks && !habits && !goals && !notes && !expenses) return { ok: false };
 
@@ -468,6 +501,7 @@ export const useStore = create<StoreState>()(
           timeEntries: (timeEntries as TimeEntry[]) ?? [],
           aiRecords: (aiRecords as AIRecord[]) ?? [],
           alarms: (alarms as Alarm[]) ?? [],
+          alarmStats: alarmStats ?? get().alarmStats,
           sleepSessions: (sleepSessions as SleepSession[]) ?? [],
           sleepActive: null,
           pendingRings: [],

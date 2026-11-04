@@ -24,10 +24,33 @@ export type TaskSource = "user" | "ai" | "t0" | "import";
 export type Repeat = "none" | "daily" | "weekdays" | "weekly" | "every3d";
 
 /**
+ * Budilnik missiyasi turlari — Mission Alarm uslubi (v1.8).
+ * Zang oynasi "To'xtatish" tugmasi barcha missiyalar bajarilguncha yopilmaydi.
+ *  — math:   matematik misol (qiyinlikka qarab)
+ *  — memory: ketma-ketlikni eslab, xuddi shu tartibda bosish
+ *  — typing: ko'rsatilgan iborani aynan yozib berish
+ *  — shake:  telefonni N marta silkitish (akselerometr)
+ *  — motion: turib N qadam yurish (akselerometr to'lqinlari)
+ */
+export type MissionType = "math" | "memory" | "typing" | "shake" | "motion";
+export type MissionDifficulty = "easy" | "medium" | "hard";
+
+/** Budilnik bo'yicha uyg'onish statistikasi — zang natijasidan avtomatik yig'iladi */
+export interface AlarmStat {
+  /** Ketma-ket o'z vaqtida o'chirishlar — snooze qilinsa nolga tushadi */
+  streak: number;
+  total: number;
+  snoozes: number;
+  last: "win" | "snooze";
+  lastAt: string;
+}
+
+/**
  * Budilnik — mahalliy, oflayn. time = "HH:mm" (floating),
  * days: 0=yakshanba … 6=shanba; bo'sh massiv = bir marta.
- * challenge=true bo'lsa — o'chirish uchun matematik topshiriq yechiladi
+ * challenge=true bo'lsa — o'chirish uchun missiyalar yechiladi
  * (bosib o'chib bo'lmaydi — PRD talabi: bajargandan keyin o'chadi).
+ * Eski ma'lumotlarda missions bo'lmasa — challenge=true → ["math"] deb olinadi.
  */
 export interface Alarm {
   id: string;
@@ -35,7 +58,21 @@ export interface Alarm {
   days: number[];
   label?: string;
   enabled: boolean;
+  /** Eski maydon (moslashuvchanlik uchun saqlanadi): topshiriqli o'chirish yoqiqmi */
   challenge: boolean;
+  /** Missiya zanjiri (1..4) — ketma-ket bajariladi */
+  missions?: MissionType[];
+  /** Qiyinlik darajasi — aqili rejimda zang vaqtida avtomatik oshishi mumkin */
+  difficulty?: MissionDifficulty;
+  /** Aqili rejim: missiya tartibi har zangda aralashadi, qiyinlik moslashadi,
+   *  yotish eslatmasi budilnik vaqtidan avtomatik hisoblanadi */
+  smart?: boolean;
+  /** Snooze soni cheklovi: null = cheklovsiz, 0 = snooze yo'q, N = shuncha marta */
+  snoozeLimit?: number | null;
+  /** Snooze davomiyligi (daqiqa) */
+  snoozeMin?: number;
+  /** Yengil uyg'otish — zang ovozi asta-sekin kuchayadi */
+  gentle?: boolean;
   createdAt: string;
 }
 
@@ -80,8 +117,22 @@ export interface PendingRing {
   body?: string;
   /** ISO mahalliy — signal chalinadigan vaqt */
   at: string;
-  /** O'chirish uchun topshiriq kerakmi */
+  /** O'chirish uchun topshiriq kerakmi (eski maydon — missions bilan birga ishlaydi) */
   challenge: boolean;
+  /** Missiya zanjiri (bo'sh/yo'q bo'lsa challenge=true → ["math"]) */
+  missions?: MissionType[];
+  /** Qiyinlik darajasi */
+  difficulty?: MissionDifficulty;
+  /** Aqili rejim — zang vaqtida moslashuvchan qiyinlik + tartib aralashtirish */
+  smart?: boolean;
+  /** Snooze cheklovi: null = cheklovsiz, 0 = yo'q, N = shuncha marta */
+  snoozeLimit?: number | null;
+  /** Snooze davomiyligi (daqiqa) */
+  snoozeMin?: number;
+  /** Shu zangda hozirgacha nech marta snooze bosilgan */
+  snoozeUsed?: number;
+  /** Yengil uyg'otish — ovoz asta-sekin kuchayadi */
+  gentle?: boolean;
   /** Bir marta (takrorlanmaydigan budilnik) — o'chirilganda disable bo'ladi */
   once?: boolean;
   /** Qaysi budilnik (kind=alarm) */

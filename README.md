@@ -8,7 +8,7 @@
 
 ## 📥 APK yuklab olish (Android 7.0+)
 
-Repositoriyadagi fayl: **[`apk/Universal-Life-OS-v1.7.apk`](apk/Universal-Life-OS-v1.7.apk)** (≈4.6 MB)
+Repositoriyadagi fayl: **[`apk/Universal-Life-OS-v1.8.apk`](apk/Universal-Life-OS-v1.8.apk)** (≈4.5 MB)
 
 1. Faylni bosing → **Download** (yoki `Download raw file`)
 2. Telefonda yuklangan faylni oching
@@ -39,6 +39,8 @@ Repositoriyadagi fayl: **[`apk/Universal-Life-OS-v1.7.apk`](apk/Universal-Life-O
 | 🫆 **Barmoq izi** | BiometricPrompt bilan ochish (Android 9+) — PIN zaxira usul qoladi |
 | 🔑 **O'z AI kaliti (BYOK)** | DeepSeek / Gemini / OpenRouter / Z.ai kaliti bilan APK'da ham bulut AI ishlaydi |
 | 🔔 **Bildirishnomalar** | Vazifa eslatmasi (belgilangan vaqtdan oldin), har kuni odat va ertalabki reja eslatmasi — ilova yopiq turganda ham |
+| ⏰ **Aqili budilnik** | Missiyali budilnik (Mission Alarm uslubi): matematika, xotira, yozish, silkitish, qadamlar — ketma-ket zanjir. Snooze cheklovi, yengil uyg'otish, moslashuvchan qiyinlik |
+| 🌙 **Uyqu kuzatuvi** | Sensor rejimi (akselerometr + Foreground Service), uyqu tahlili va ballari, yotish eslatmasi (budilnik vaqtidan avtomatik hisoblanadi) |
 
 ---
 
@@ -52,6 +54,23 @@ Repositoriyadagi fayl: **[`apk/Universal-Life-OS-v1.7.apk`](apk/Universal-Life-O
 - **Sinov xabari** — tizim ishlashini darhol tekshirish uchun
 
 Barcha eslatmalar **faqat qurilmada** rejalashadi (Android Local Notifications) — hech qanday server yoki push xizmati ishtirok etmaydi. Telefon qayta yoqilganda eslatmalar saqlanib qoladi.
+
+---
+
+## ⏰ Aqili budilnik (v1.8)
+
+Budilnik endi oddiy jiringlovchi emas — **Mission Alarm uslubidagi missiyalar** bilan:
+
+- **5 xil missiya**: 🧮 Matematika · 🧠 Xotira · ⌨️ Yozish · 📳 Silkitish · 🚶 Qadamlar
+- **Zanjir**: 1–4 ta missiya tanlanadi — zangni to'xtatish uchun barchasi ketma-ket bajariladi (bitta bosish bilan o'chmaydi)
+- **Aqili rejim** (yangi budilnikda avtomatik yoqiq):
+  - missiya tartibi **har zangda aralashadi** (mushak xotirasi bilan o'chib qolmaydi)
+  - **qiyinlik moslashadi** — snooze qilsangiz, keyingi safar misol qiyinroq bo'ladi
+  - **yotish eslatmasi o'zi qo'yiladi** — budilnik vaqtidan uyqu maqsadiga qarab
+  - **uyg'onish statistikasi** avtomatik yig'iladi (ketma-ket uyg'onish streak'i 🔥)
+- **Snooze nazorati**: davomiyligi (5/10/15 daq), soni cheklovi (∞/0/1/2/3) — cheklov tugasa, snooze tugmasi o'chadi
+- **Yengil uyg'otish**: ovoz asta-sekin kuchayadi (≈40 sekund)
+- **Sensor missiyalari**: akselerometr orqali; sensor javob bermasa — zaxira tugma chiqadi (tizilib qolmaysiz)
 
 ---
 

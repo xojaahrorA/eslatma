@@ -1,20 +1,26 @@
 "use client";
 
 /**
- * ─── Zang oynasi — to'liq ekran, o'chmaydigan signal (PRD 4.7) ──────────────
- * • Challenge yoqilgan bo'lsa: "To'xtatish" tugmasi faqat misol yechilgach
- *   ochiladi (bosib o'chib bo'lmaydi — bajargandan keyin o'chadi).
- * • "+5 daqiqa" (snooze) — har qanday holatda mavjud.
- * • Ovoz: WebAudio ikki tonli jiringlash tsikli + tebranish (APK'da
- *   bildirishnoma o'zi ham alarm ovozini beradi).
+ * ─── Zang oynasi — to'liq ekran, o'chmaydigan signal (PRD 4.7 + v1.8) ────────
+ * • Missiyalar (Mission Alarm uslubi): zanjir bo'lib bajariladi — barchasi
+ *   tugaguncha "To'xtatish" ochilmaydi (bosib o'chib bo'lmaydi).
+ * • Aqili rejim: missiya tartibi har zangda aralashadi, agar oldingi safar
+ *   snooze bosilgan bo'lsa qiyinlik avtomatik bir daraja oshadi.
+ * • Snooze: budilnikdagi cheklov bo'yicha (soni/davomiyligi, to'liq o'chirish
+ *   ham mumkin).
+ * • Ovoz: WebAudio jiringlash tsikli; yengil uyg'otishda ovoz asta-sekin
+ *   kuchayadi. Tebranish har tsiklda (APK'da bildirishnoma ham alarm ovozini
+ *   beradi).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { AlarmClock, BellRing, Check, Timer } from "lucide-react";
+import { BellRing, Check, Sparkles, Timer, TimerOff } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { PendingRing } from "@/lib/types";
+import type { MissionDifficulty, MissionType, PendingRing } from "@/lib/types";
 import { parseLocal } from "@/lib/utils-app";
+import { useStore } from "@/lib/store";
+import { MissionRunner, shuffle } from "./missions";
 
 interface Props {
   ring: PendingRing;
@@ -23,53 +29,74 @@ interface Props {
   onSnooze: (min: number) => void;
 }
 
-function makeChallenge(): { a: number; b: number; c: number; ans: number } {
-  const a = 6 + Math.floor(Math.random() * 7); // 6..12
-  const b = 6 + Math.floor(Math.random() * 7); // 6..12
-  const c = 21 + Math.floor(Math.random() * 68); // 21..88
-  return { a, b, c, ans: a * b + c };
-}
-
 export default function RingOverlay({ ring, t, onDismiss, onSnooze }: Props) {
-  const needChallenge = ring.challenge;
-  const [chal, setChal] = useState(() => (needChallenge ? makeChallenge() : null));
-  const [val, setVal] = useState("");
-  const [solved, setSolved] = useState(!needChallenge);
-  const [wrong, setWrong] = useState(false);
+  // ─── Missiya zanjiri: aqili rejimda tartib har zangda aralashadi ───
+  const missions: MissionType[] = useMemo(() => {
+    const base: MissionType[] =
+      ring.missions && ring.missions.length ? ring.missions : ring.challenge ? ["math"] : [];
+    return ring.smart ? shuffle(base) : base;
+    // faqat birinchi renderda aniqlanadi — zang davomida o'zgarmasin
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ─── Moslashuvchan qiyinlik (aqili rejim): oldingi zang snooze bo'lsa +1 daraja ───
+  const { difficulty, bumped } = useMemo(() => {
+    const base: MissionDifficulty = ring.difficulty ?? "medium";
+    if (!ring.smart || !ring.alarmId) return { difficulty: base, bumped: false };
+    const stat = useStore.getState().alarmStats[ring.alarmId];
+    const order: MissionDifficulty[] = ["easy", "medium", "hard"];
+    let i = order.indexOf(base);
+    if (stat && (stat.last === "snooze" || stat.snoozes >= 2) && i < order.length - 1) {
+      return { difficulty: order[i + 1], bumped: true };
+    }
+    return { difficulty: base, bumped: false };
+    // faqat birinchi renderda aniqlanadi
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const [allDone, setAllDone] = useState(missions.length === 0);
   const [now, setNow] = useState(() => new Date());
-  const audioRef = useRef<{ ctx: AudioContext; iv: number } | null>(null);
+  const audioRef = useRef<{ ctx: AudioContext; iv: number; master: GainNode } | null>(null);
   const vibRef = useRef<number | null>(null);
 
-  // ── Ovoz: ikki tonli jiringlash tsikli (AudioContext bloklansa — jaranglamaydi,
-  //     lekin APK'da bildirishnoma ovozi baribir chalindi) ──
+  // ─── Ovoz: jiringlash tsikli; yengil uyg'otishda ovoz asta-sekin kuchayadi ──
   useEffect(() => {
+    const gentle = ring.gentle;
+    let cycle = 0;
     try {
       const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       const ctx = new AC();
       void ctx.resume();
+      const master = ctx.createGain();
+      master.gain.value = gentle ? 0.03 : 0.22;
+      master.connect(ctx.destination);
       const beep = (freq: number, at: number, dur = 0.16) => {
         const o = ctx.createOscillator();
         const g = ctx.createGain();
         o.type = "sine";
         o.frequency.value = freq;
         g.gain.setValueAtTime(0.0001, at);
-        g.gain.exponentialRampToValueAtTime(0.22, at + 0.02);
+        g.gain.exponentialRampToValueAtTime(1, at + 0.02);
         g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-        o.connect(g).connect(ctx.destination);
+        o.connect(g).connect(master);
         o.start(at);
         o.stop(at + dur + 0.02);
       };
       const iv = window.setInterval(() => {
+        // yengil uyg'otish: har tsiklda ovoz +~35%, 0.22 da to'xtaydi (≈40 sekund)
+        if (gentle) {
+          cycle += 1;
+          master.gain.setTargetAtTime(Math.min(0.22, 0.03 + cycle * 0.035), ctx.currentTime, 0.2);
+        }
         const t0 = ctx.currentTime;
         beep(880, t0 + 0.0);
         beep(1174, t0 + 0.22);
         beep(880, t0 + 0.44);
         beep(1174, t0 + 0.66);
       }, 1400);
-      // birinchi tsilni darhol chal
       beep(880, ctx.currentTime);
       beep(1174, ctx.currentTime + 0.22);
-      audioRef.current = { ctx, iv };
+      audioRef.current = { ctx, iv, master };
     } catch {
       /* audio yo'q */
     }
@@ -93,6 +120,7 @@ export default function RingOverlay({ ring, t, onDismiss, onSnooze }: Props) {
         vibRef.current = null;
       }
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // jonli soat
@@ -108,17 +136,11 @@ export default function RingOverlay({ ring, t, onDismiss, onSnooze }: Props) {
   }, [atDate]);
   const lateMin = atDate ? Math.max(0, Math.round((now.getTime() - atDate.getTime()) / 60000)) : 0;
 
-  const check = () => {
-    if (!chal) return;
-    if (Number(val.trim()) === chal.ans) {
-      setSolved(true);
-      setWrong(false);
-    } else {
-      setWrong(true);
-      setVal("");
-      setTimeout(() => setWrong(false), 900);
-    }
-  };
+  // ─── Snooze cheklovi: null = cheklovsiz, 0 = yo'q, N = shuncha marta ───
+  const snoozeMin = ring.snoozeMin ?? 5;
+  const snoozeUsed = ring.snoozeUsed ?? 0;
+  const snoozeLeft = ring.snoozeLimit == null ? null : Math.max(0, ring.snoozeLimit - snoozeUsed);
+  const snoozeBlocked = ring.snoozeLimit === 0 || (snoozeLeft != null && snoozeLeft <= 0);
 
   return (
     <motion.div
@@ -152,6 +174,12 @@ export default function RingOverlay({ ring, t, onDismiss, onSnooze }: Props) {
         <h1 className="max-w-[86vw] text-2xl font-bold leading-tight text-white">
           {ring.title || t("more.alarm")}
         </h1>
+        {bumped && (
+          <span className="flex items-center gap-1 rounded-full border border-violet-500/30 bg-violet-500/10 px-3 py-1 text-[11px] font-bold text-violet-300">
+            <Sparkles className="h-3 w-3" />
+            {t("mission.adaptive")}
+          </span>
+        )}
       </div>
 
       {/* ─── Markaz: soat ─── */}
@@ -169,71 +197,50 @@ export default function RingOverlay({ ring, t, onDismiss, onSnooze }: Props) {
         </p>
       </div>
 
-      {/* ─── Pastki: challenge + tugmalar ─── */}
+      {/* ─── Pastki: missiyalar + tugmalar ─── */}
       <div className="mb-8 w-full max-w-[420px]">
-        {needChallenge && chal && (
-          <div
-            className={cn(
-              "mb-4 rounded-3xl border p-4",
-              wrong ? "border-rose-500/60 bg-rose-500/10" : solved ? "border-emerald-500/40 bg-emerald-500/10" : "border-white/10 bg-white/[0.04]"
-            )}
-          >
-            {!solved ? (
-              <>
-                <p className="mb-2 flex items-center gap-2 text-xs font-semibold text-white/70">
-                  <AlarmClock className="h-3.5 w-3.5" />
-                  {t("ring.challengeTitle")}
-                </p>
-                <p className="text-center text-[28px] font-extrabold tabular-nums text-white">
-                  {chal.a} × {chal.b} + {chal.c} = ?
-                </p>
-                <div className="mt-3 flex gap-2">
-                  <input
-                    autoFocus
-                    inputMode="numeric"
-                    value={val}
-                    onChange={(e) => setVal(e.target.value.replace(/[^0-9]/g, ""))}
-                    onKeyDown={(e) => e.key === "Enter" && check()}
-                    placeholder={t("ring.answerPh")}
-                    className={cn(
-                      "flex-1 rounded-2xl bg-black/30 px-4 py-3 text-center text-lg font-bold tabular-nums text-white outline-none placeholder:text-white/30",
-                      wrong && "ring-2 ring-rose-500"
-                    )}
-                  />
-                  <button
-                    onClick={check}
-                    className="rounded-2xl bg-white/10 px-5 text-sm font-bold text-white transition-colors hover:bg-white/20"
-                  >
-                    {t("ring.check")}
-                  </button>
-                </div>
-                {wrong && <p className="mt-2 text-center text-xs font-semibold text-rose-400">{t("ring.wrong")}</p>}
-              </>
+        {missions.length > 0 && (
+          <div className="mb-4">
+            {!allDone ? (
+              <MissionRunner missions={missions} difficulty={difficulty} t={t} onAllPass={() => setAllDone(true)} />
             ) : (
-              <p className="flex items-center justify-center gap-2 py-2 text-sm font-bold text-emerald-400">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white">
-                  <Check className="h-4 w-4" strokeWidth={3} />
-                </span>
-                {t("ring.solved")}
-              </p>
+              <div className="rounded-3xl border border-emerald-500/40 bg-emerald-500/10 p-4">
+                <p className="flex items-center justify-center gap-2 py-2 text-sm font-bold text-emerald-400">
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-500 text-white">
+                    <Check className="h-4 w-4" strokeWidth={3} />
+                  </span>
+                  {t("mission.allDone")}
+                </p>
+              </div>
             )}
           </div>
         )}
 
         <div className="flex gap-2.5">
           <button
-            onClick={() => onSnooze(5)}
-            className="flex items-center gap-2 rounded-2xl bg-white/10 px-5 py-4 text-sm font-bold text-white/85 transition-colors hover:bg-white/20"
+            onClick={() => onSnooze(snoozeMin)}
+            disabled={snoozeBlocked}
+            title={snoozeBlocked ? t("ring.snoozeOff") : undefined}
+            className={cn(
+              "flex items-center gap-2 rounded-2xl px-5 py-4 text-sm font-bold transition-colors",
+              snoozeBlocked
+                ? "cursor-not-allowed bg-white/[0.06] text-white/30"
+                : "bg-white/10 text-white/85 hover:bg-white/20"
+            )}
           >
-            <Timer className="h-4 w-4" />
-            {t("ring.snooze")}
+            {snoozeBlocked ? <TimerOff className="h-4 w-4" /> : <Timer className="h-4 w-4" />}
+            {snoozeBlocked
+              ? t("ring.snoozeOff")
+              : snoozeLeft != null
+                ? t("ring.snoozeLeft", { m: snoozeMin, n: snoozeLeft })
+                : t("ring.snoozeMin", { m: snoozeMin })}
           </button>
           <button
             onClick={onDismiss}
-            disabled={!solved}
+            disabled={!allDone}
             className={cn(
               "flex-1 rounded-2xl py-4 text-base font-extrabold transition-all",
-              solved
+              allDone
                 ? "bg-rose-500 text-white shadow-lg shadow-rose-500/30 hover:bg-rose-600 active:scale-[0.98]"
                 : "cursor-not-allowed bg-white/[0.06] text-white/30"
             )}
