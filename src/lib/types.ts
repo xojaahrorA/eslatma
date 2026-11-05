@@ -325,6 +325,10 @@ export interface Settings {
   sleepGoalH?: number;
   /** Yotish eslatmasi — "HH:mm" yoki null */
   sleepBedtime?: string | null;
+  /** Oxirgi o'zgartirilgan yotish vaqti — eslatma qayta yoqilganda 23:00 majburiy emas, shu qaytadi */
+  sleepBedtimePrev?: string | null;
+  /** Foydalanuvchi yotish vaqtini o'zi tanlagan — aqili rejim ustidan yozmaydi */
+  sleepBedtimeManual?: boolean;
   /** Yotish eslatmasi oldidan ogohlantirish (daqiqa) */
   sleepWindMin?: number;
   seeded?: boolean;

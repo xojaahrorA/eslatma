@@ -89,7 +89,13 @@ export default function AlarmView() {
       const btM = ((total % 60) + 60) % 60;
       const bt = `${pad2(btH)}:${pad2(btM)}`;
       const cur = st.settings.sleepBedtime;
-      if (!cur) {
+      // v1.10: foydalanuvchi yotish vaqtini o'zi qo'ysa (yoki o'chirsa) —
+      // aqili rejim ustidan yozmaydi, majburiy vaqt yo'q
+      if (st.settings.sleepBedtimeManual) {
+        import("sonner").then(({ toast }) =>
+          toast(t("alarm.bedtimeManual", { t: cur ?? bt }))
+        );
+      } else if (!cur) {
         st.setSettings({ sleepBedtime: bt });
         import("sonner").then(({ toast }) => toast(t("alarm.bedtimeAuto", { t: bt })));
       } else {

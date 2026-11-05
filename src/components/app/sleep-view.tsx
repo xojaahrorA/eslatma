@@ -49,6 +49,10 @@ import {
 } from "lucide-react";
 
 const GOALS = [6, 7, 8, 9];
+/** Tezkor yotish vaqtlari — chip bilan bir bosishda o'zgartirish (v1.10) */
+const BEDTIMES = ["22:00", "22:30", "23:00", "23:30", "00:00"];
+/** Wind-down eslatma daqiqalari — foydalanuvchi tanlaydi (majburiy 30 emas) */
+const WINDS = [15, 30, 45, 60];
 
 export default function SleepView() {
   const { t, lang } = useUlos();
@@ -280,7 +284,7 @@ export default function SleepView() {
 
   const applyAdvice = (key: string, act: AdviceAction) => {
     const st = useStore.getState();
-    if (act.kind === "setBedtime") st.setSettings({ sleepBedtime: act.value });
+    if (act.kind === "setBedtime") st.setSettings({ sleepBedtime: act.value, sleepBedtimePrev: act.value, sleepBedtimeManual: true });
     else if (act.kind === "setWindMin") st.setSettings({ sleepWindMin: act.value });
     else if (act.kind === "setGoal") st.setSettings({ sleepGoalH: act.value });
     else if (act.kind === "shiftAlarm") st.updateAlarm(act.alarmId, { time: act.value });
@@ -522,28 +526,26 @@ export default function SleepView() {
           ))}
         </div>
 
+        {/* Yotish eslatmasi — yoq/o'chir toggle. Vaqt alohida qatorda: har doim
+            tahrirlanadi, toggle yoqilganda majburiy 23:00 yozilmaydi — oxirgi
+            o'zgartirilgan vaqt qaytadi (v1.10 tuzatish) */}
         <button
-          onClick={() =>
-            setSettings({ sleepBedtime: bedtime ? null : "23:00" })
-          }
+          onClick={() => {
+            if (bedtime) {
+              // O'chirish: oxirgi vaqtni eslab qolamiz + foydalanuvchi boshqaruvda —
+              // aqili rejim uni qayta yoqmaydi (holat esdan chiqmaydi)
+              setSettings({ sleepBedtime: null, sleepBedtimePrev: bedtime, sleepBedtimeManual: true });
+            } else {
+              setSettings({ sleepBedtime: settings.sleepBedtimePrev ?? "23:00" });
+            }
+          }}
           className="flex w-full items-center gap-3 rounded-2xl bg-muted/60 p-3 text-left"
         >
           <span className={cn("rounded-xl p-2", bedtime ? "bg-indigo-500/15 text-indigo-500" : "bg-background text-muted-foreground")}>
             <BedDouble className="h-4.5 w-4.5" />
           </span>
           <span className="min-w-0 flex-1">
-            <span className="flex items-center justify-between gap-2">
-              <span className="text-sm font-bold">{t("sleep.bedtime")}</span>
-              {bedtime && (
-                <input
-                  type="time"
-                  value={bedtime}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => setSettings({ sleepBedtime: e.target.value || null })}
-                  className="rounded-xl bg-background px-2.5 py-1.5 text-sm font-bold tabular-nums outline-none"
-                />
-              )}
-            </span>
+            <span className="block text-sm font-bold">{t("sleep.bedtime")}</span>
             <span className="mt-0.5 block text-[11px] text-muted-foreground">
               {bedtime ? t("sleep.bedtimeHint", { n: settings.sleepWindMin ?? 30 }) : t("common.none")}
             </span>
@@ -552,7 +554,58 @@ export default function SleepView() {
             <span className={cn("h-5 w-5 rounded-full bg-white shadow transition-transform", bedtime && "translate-x-5")} />
           </span>
         </button>
-        {!bedtime && (
+
+        {bedtime ? (
+          <>
+            {/* Eslatma vaqti — to'liq alohida qator: istalgan payt o'zgartiriladi */}
+            <p className="mb-1.5 mt-3 text-[11px] font-semibold text-muted-foreground">{t("sleep.bedtimeAt")}</p>
+            <input
+              type="time"
+              value={bedtime}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (!v) return;
+                setSettings({ sleepBedtime: v, sleepBedtimePrev: v, sleepBedtimeManual: true });
+              }}
+              className="w-full rounded-2xl bg-muted/60 px-3 py-3 text-base font-extrabold tabular-nums outline-none"
+            />
+            {/* Tezkor tanlovlar — bir bosishda */}
+            <div className="mt-1.5 grid grid-cols-5 gap-1.5">
+              {BEDTIMES.map((bt) => (
+                <button
+                  key={bt}
+                  onClick={() => setSettings({ sleepBedtime: bt, sleepBedtimePrev: bt, sleepBedtimeManual: true })}
+                  className={cn(
+                    "rounded-xl border py-2 text-[11px] font-bold tabular-nums transition-all active:scale-95",
+                    bedtime === bt
+                      ? "border-indigo-500/40 bg-indigo-500/15 text-indigo-600 dark:text-indigo-300"
+                      : "border-border bg-card text-muted-foreground"
+                  )}
+                >
+                  {bt}
+                </button>
+              ))}
+            </div>
+            {/* Wind-down daqiqasi — foydalanuvchi tanlaydi (majburiy emas) */}
+            <p className="mb-1.5 mt-3 text-[11px] font-semibold text-muted-foreground">{t("sleep.windMin")}</p>
+            <div className="grid grid-cols-4 gap-1.5">
+              {WINDS.map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setSettings({ sleepWindMin: n })}
+                  className={cn(
+                    "rounded-xl border py-2 text-[11px] font-bold tabular-nums transition-all active:scale-95",
+                    (settings.sleepWindMin ?? 30) === n
+                      ? "border-indigo-500/40 bg-indigo-500/15 text-indigo-600 dark:text-indigo-300"
+                      : "border-border bg-card text-muted-foreground"
+                  )}
+                >
+                  {n} {t("sleep.minShort")}
+                </button>
+              ))}
+            </div>
+          </>
+        ) : (
           <p className="mt-2 flex items-start gap-1.5 rounded-xl bg-amber-500/10 px-3 py-2 text-[10.5px] leading-snug text-amber-600 dark:text-amber-300">
             <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             {t("sleep.bedtimeOff")}
