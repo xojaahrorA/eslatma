@@ -45,6 +45,15 @@ export interface AlarmStat {
   lastAt: string;
 }
 
+/** Bitta zang natijasi — budilnik analitikasi uchun tarix (v1.9) */
+export interface RingEvent {
+  key: string;
+  alarmId: string;
+  outcome: "win" | "snooze";
+  snoozes: number;
+  at: string; // ISO mahalliy
+}
+
 /**
  * Budilnik — mahalliy, oflayn. time = "HH:mm" (floating),
  * days: 0=yakshanba … 6=shanba; bo'sh massiv = bir marta.

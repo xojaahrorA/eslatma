@@ -19,9 +19,11 @@ import {
   CATEGORY_ICON,
 } from "@/lib/utils-app";
 import type { Lang } from "@/lib/types";
+import { sleepTaskLink } from "@/lib/sleep-insights";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import {
+  AlarmClock,
   BarChart3,
   Brain,
   CalendarCheck,
@@ -30,6 +32,7 @@ import {
   ChevronRight,
   Flame,
   Lightbulb,
+  Moon,
   PieChart,
   TrendingUp,
   Wallet,
@@ -49,6 +52,7 @@ interface Bucket {
   focus: number;
   spent: number;
   habits: number;
+  sleep: number;
 }
 
 interface HabitAdh {
@@ -77,6 +81,15 @@ interface PeriodData {
   habits: HabitAdh[];
   completion: number; // 0..1
   activeDays: number;
+  // ─── Uyqu + budilnik (v1.9) ───
+  sleepTrackedDays: number;
+  sleepAvgMin: number; // kuzatilgan kunlar o'rtachasi (tun + tushlik)
+  sleepDebtMin: number;
+  sleepScore: number | null;
+  naps: number;
+  napMin: number;
+  ringWins: number;
+  ringSnoozes: number;
 }
 
 // ─── Yordamchilar ────────────────────────────────────────────────────────────
@@ -131,9 +144,12 @@ function computePeriod(
     timeEntries: ReturnType<typeof useStore.getState>["timeEntries"];
     expenses: ReturnType<typeof useStore.getState>["expenses"];
     notes: ReturnType<typeof useStore.getState>["notes"];
+    sleepSessions: ReturnType<typeof useStore.getState>["sleepSessions"];
+    ringHistory: ReturnType<typeof useStore.getState>["ringHistory"];
+    sleepGoalMin: number;
   }
 ): PeriodData {
-  const { tasks, habits, habitLogs, timeEntries, expenses, notes } = data;
+  const { tasks, habits, habitLogs, timeEntries, expenses, notes, sleepSessions, ringHistory, sleepGoalMin } = data;
   const { start, end } = periodRange(mode, offset);
   const ks = dateKey(start);
   const ke = dateKey(end);
@@ -145,7 +161,7 @@ function computePeriod(
   if (mode === "year") {
     for (let m = 0; m < 12; m++) {
       idxOf.set(`${start.getFullYear()}-${String(m + 1).padStart(2, "0")}`, m);
-      buckets.push({ key: `${m}`, label: monthShort(m, lang), done: 0, missed: 0, focus: 0, spent: 0, habits: 0 });
+      buckets.push({ key: `${m}`, label: monthShort(m, lang), done: 0, missed: 0, focus: 0, spent: 0, habits: 0, sleep: 0 });
     }
   } else {
     for (let d = new Date(start); d <= end; d = addDays(d, 1)) {
@@ -159,6 +175,7 @@ function computePeriod(
         focus: 0,
         spent: 0,
         habits: 0,
+        sleep: 0,
       });
     }
   }
@@ -187,6 +204,50 @@ function computePeriod(
   for (const l of habitLogs) {
     const i = idxOf.get(l.date.slice(0, sl));
     if (i !== undefined && l.value > 0) buckets[i].habits += l.value;
+  }
+  // Uyqu: sessiya UYG'ONILGAN kunga yoziladi (kechagi tun — bugun) (v1.9)
+  let sleepTrackedDays = 0;
+  let sleepDebtMin = 0;
+  let scoreSum = 0;
+  let scoreN = 0;
+  let naps = 0;
+  let napMin = 0;
+  for (const s of sleepSessions) {
+    const st = new Date(s.start);
+    const en = new Date(s.end);
+    if (isNaN(st.getTime()) || isNaN(en.getTime()) || en.getTime() <= st.getTime()) continue;
+    const k =
+      en.getFullYear() + "-" + String(en.getMonth() + 1).padStart(2, "0") + "-" + String(en.getDate()).padStart(2, "0");
+    const i = idxOf.get(k);
+    if (i === undefined) continue;
+    const min = Math.min(16 * 60, Math.round((en.getTime() - st.getTime()) / 60_000));
+    buckets[i].sleep += min;
+    const isNap = min < 210 && st.getHours() >= 4 && st.getHours() < 21;
+    if (isNap) {
+      naps++;
+      napMin += min;
+    }
+    if (s.score != null) {
+      scoreSum += s.score;
+      scoreN++;
+    }
+  }
+  for (const b of buckets) {
+    if (b.sleep > 0) {
+      sleepTrackedDays++;
+      sleepDebtMin += Math.max(0, sleepGoalMin - b.sleep);
+    }
+  }
+  const sleepTotalMin = buckets.reduce((a, b) => a + b.sleep, 0);
+  const sleepAvgMin = sleepTrackedDays > 0 ? Math.round(sleepTotalMin / sleepTrackedDays) : 0;
+  // Budilnik: davr ichidagi zang natijalari (v1.9)
+  const rk = ks + "T00:00";
+  let ringWins = 0;
+  let ringSnoozes = 0;
+  for (const ev of ringHistory) {
+    if (ev.at < rk) continue;
+    if (ev.outcome === "win") ringWins++;
+    else ringSnoozes++;
   }
 
   const done = buckets.reduce((a, b) => a + b.done, 0);
@@ -270,16 +331,27 @@ function computePeriod(
     habits: habitAdh,
     completion: done + missed > 0 ? done / (done + missed) : 0,
     activeDays,
+    sleepTrackedDays,
+    sleepAvgMin,
+    sleepDebtMin,
+    sleepScore: scoreN > 0 ? Math.round(scoreSum / scoreN) : null,
+    naps,
+    napMin,
+    ringWins,
+    ringSnoozes,
   };
 }
 
 // ─── Life Score: 0..100 kompozit ─────────────────────────────────────────────
 
 function lifeScore(p: PeriodData, budget: number): number {
+  // uyqu: kuzatilgan kunlarda maqsadga yetish ulushi (v1.9 — budilnik/uyqu integratsiyasi)
+  const sleepVal = p.sleepTrackedDays > 0 ? clamp(p.sleepAvgMin / 480, 0, 1) : null;
   const parts: { w: number; v: number | null }[] = [
-    { w: 0.4, v: p.done + p.missed > 0 ? p.completion : null },
-    { w: 0.3, v: p.habitExpected > 0 ? clamp(p.habitActual / p.habitExpected, 0, 1) : null },
-    { w: 0.2, v: p.focusMin > 0 ? clamp(p.focusMin / (p.days * 30), 0, 1) : 0 },
+    { w: 0.35, v: p.done + p.missed > 0 ? p.completion : null },
+    { w: 0.25, v: p.habitExpected > 0 ? clamp(p.habitActual / p.habitExpected, 0, 1) : null },
+    { w: 0.15, v: sleepVal },
+    { w: 0.15, v: p.focusMin > 0 ? clamp(p.focusMin / (p.days * 30), 0, 1) : 0 },
     {
       w: 0.1,
       v: p.spent > 0 && budget > 0 ? clamp(1 - Math.max(0, p.spent - budget * (p.days / 30)) / (budget * (p.days / 30)), 0, 1) : null,
@@ -438,6 +510,32 @@ function MiniStat({ big, sub, accent }: { big: string; sub: string; accent?: str
   );
 }
 
+/** Uyqu ustunlari — davr bo'yicha kunlik/oylik jami, maqsad chizig'i bilan (v1.9) */
+function SleepBars({ buckets, goalMin }: { buckets: Bucket[]; goalMin: number }) {
+  const max = Math.max(goalMin * 1.2, ...buckets.map((b) => b.sleep), 60);
+  return (
+    <div className="relative flex h-24 items-end gap-[3px]">
+      <div
+        className="pointer-events-none absolute left-0 right-0 border-t border-dashed border-violet-500/50"
+        style={{ bottom: `${(goalMin / max) * 100}%` }}
+      />
+      {buckets.map((b, i) => (
+        <div key={b.key} className="flex h-full min-w-0 flex-1 items-end">
+          <motion.div
+            initial={{ height: 0 }}
+            animate={{ height: b.sleep > 0 ? `${Math.max(4, (b.sleep / max) * 100)}%` : "2%" }}
+            transition={{ delay: i * 0.015, duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            className={cn(
+              "w-full rounded-md",
+              b.sleep >= goalMin ? "bg-violet-500" : b.sleep > 0 ? "bg-violet-500/45" : "bg-muted-foreground/15"
+            )}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function HeatCell({ v }: { v: number }) {
   return (
     <div
@@ -464,18 +562,45 @@ export default function AnalyticsView() {
   const expenses = useStore((s) => s.expenses);
   const notes = useStore((s) => s.notes);
   const budget = useStore((s) => s.settings.financeBudget);
+  const sleepSessions = useStore((s) => s.sleepSessions);
+  const ringHistory = useStore((s) => s.ringHistory);
+  const alarmStats = useStore((s) => s.alarmStats);
+  const alarmsCount = useStore((s) => s.alarms.filter((a) => a.enabled).length);
+  const sleepGoalMin = useStore((s) => (s.settings.sleepGoalH ?? 8) * 60);
 
   const [mode, setMode] = useState<Mode>("week");
   const [offset, setOffset] = useState(0);
   const [selected, setSelected] = useState(-1);
 
   const data = useMemo(
-    () => computePeriod(mode, offset, lang, { tasks, habits, habitLogs, timeEntries, expenses, notes }),
-    [mode, offset, lang, tasks, habits, habitLogs, timeEntries, expenses, notes]
+    () =>
+      computePeriod(mode, offset, lang, {
+        tasks,
+        habits,
+        habitLogs,
+        timeEntries,
+        expenses,
+        notes,
+        sleepSessions,
+        ringHistory,
+        sleepGoalMin,
+      }),
+    [mode, offset, lang, tasks, habits, habitLogs, timeEntries, expenses, notes, sleepSessions, ringHistory, sleepGoalMin]
   );
   const prev = useMemo(
-    () => computePeriod(mode, offset - 1, lang, { tasks, habits, habitLogs, timeEntries, expenses, notes }),
-    [mode, offset, lang, tasks, habits, habitLogs, timeEntries, expenses, notes]
+    () =>
+      computePeriod(mode, offset - 1, lang, {
+        tasks,
+        habits,
+        habitLogs,
+        timeEntries,
+        expenses,
+        notes,
+        sleepSessions,
+        ringHistory,
+        sleepGoalMin,
+      }),
+    [mode, offset, lang, tasks, habits, habitLogs, timeEntries, expenses, notes, sleepSessions, ringHistory, sleepGoalMin]
   );
 
   const score = useMemo(() => lifeScore(data, budget), [data, budget]);
@@ -488,6 +613,10 @@ export default function AnalyticsView() {
     [data.byCat]
   );
   const maxCat = catRows.length ? catRows[0][1] : 1;
+  const bestStreak = useMemo(
+    () => Math.max(0, ...Object.values(alarmStats).map((s) => s.streak)),
+    [alarmStats]
+  );
 
   // T0 tahlil qoidalari
   const insights = useMemo(() => {
@@ -532,8 +661,21 @@ export default function AnalyticsView() {
       const we = data.buckets.slice(5).reduce((a, b) => a + b.done, 0) / 2;
       if (wd >= 1 && we < wd * 0.5) ins.push({ icon: <Lightbulb className="h-3.5 w-3.5" />, text: t("ana.in.weekendDrop") });
     }
-    return ins.slice(0, 5);
-  }, [data, prev, mode, catRows, lang, t]);
+    // Uyqu ↔ vazifalar bog'liqligi (v1.9)
+    const link = sleepTaskLink(sleepSessions, tasks, sleepGoalMin, 14);
+    if (link.ok) {
+      ins.push({
+        icon: <Moon className="h-3.5 w-3.5" />,
+        text: t("ana.in.sleepLink", { g: link.goodDone.toFixed(1), b: Math.max(1, Math.round(link.badDone)), gd: link.goodDays, bd: link.badDays }),
+      });
+    }
+    // Budilnik intizomi (v1.9)
+    if (data.ringWins + data.ringSnoozes >= 3) {
+      const wr = Math.round((data.ringWins / (data.ringWins + data.ringSnoozes)) * 100);
+      ins.push({ icon: <AlarmClock className="h-3.5 w-3.5" />, text: t(wr >= 80 ? "ana.in.ringHigh" : "ana.in.ringLow", { p: wr }) });
+    }
+    return ins.slice(0, 6);
+  }, [data, prev, mode, catRows, lang, t, sleepSessions, tasks, sleepGoalMin]);
 
   // Yillik heatmap: kunlik faollik
   const heat = useMemo(() => {
@@ -560,7 +702,17 @@ export default function AnalyticsView() {
     return cells;
   }, [mode, offset, tasks, habitLogs]);
 
-  const hasAnyData = data.done + data.missed + data.habitActual + data.spent + data.focusMin + data.notesCreated > 0;
+  const hasAnyData =
+    data.done +
+      data.missed +
+      data.habitActual +
+      data.spent +
+      data.focusMin +
+      data.notesCreated +
+      data.sleepTrackedDays +
+      data.ringWins +
+      data.ringSnoozes >
+    0;
 
   // Yillik "Wrapped" uchun
   const bestMonthIdx = useMemo(() => {
@@ -730,6 +882,87 @@ export default function AnalyticsView() {
               <span>{data.buckets[data.buckets.length - 1]?.label}</span>
             </div>
           </SectionCard>
+
+          {/* ─── Uyqu va budilnik — bog'langan rejimlar (v1.9) ─── */}
+          {(data.sleepTrackedDays > 0 || data.ringWins + data.ringSnoozes > 0 || alarmsCount > 0) && (
+            <SectionCard>
+              <SectionHead
+                icon={<Moon className="h-4 w-4" />}
+                title={t("ana.sleepTitle")}
+                sub={t("ana.sleepSub")}
+                accent="text-violet-500"
+                right={
+                  data.sleepTrackedDays > 0 ? (
+                    <Chip className="border-violet-500/25 bg-violet-500/10 text-violet-600 dark:text-violet-300">
+                      {fmtMinutes(data.sleepAvgMin, t)}
+                    </Chip>
+                  ) : undefined
+                }
+              />
+              {data.sleepTrackedDays > 0 && (
+                <>
+                  <SleepBars buckets={data.buckets} goalMin={sleepGoalMin} />
+                  <div className="mt-3 grid grid-cols-3 gap-2">
+                    <MiniStat
+                      big={fmtMinutes(data.sleepAvgMin, t)}
+                      sub={`${t("ana.sleepAvg")} · ${data.sleepTrackedDays} ${lang === "ru" ? "дн." : lang === "en" ? "days" : "kun"}`}
+                      accent="text-violet-500"
+                    />
+                    <MiniStat
+                      big={data.sleepDebtMin > 0 ? fmtMinutes(data.sleepDebtMin, t) : "0"}
+                      sub={t("sleep.debt")}
+                      accent={data.sleepDebtMin > 240 ? "text-rose-500" : data.sleepDebtMin > 0 ? "text-amber-500" : "text-emerald-500"}
+                    />
+                    <MiniStat
+                      big={data.sleepScore != null ? String(data.sleepScore) : "—"}
+                      sub={t("sleep.score")}
+                      accent="text-teal-500"
+                    />
+                  </div>
+                </>
+              )}
+              {data.naps > 0 && (
+                <p className="mt-2 rounded-2xl bg-amber-500/10 px-3 py-2 text-[11px] font-semibold text-amber-600 dark:text-amber-300">
+                  ☕ {t("ana.napsIn", { n: data.naps, m: fmtMinutes(data.napMin, t) })}
+                </p>
+              )}
+              {/* Budilnik natijalari — zang tarixidan */}
+              <div className="mt-3 rounded-2xl border border-border bg-card p-3">
+                <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+                  <AlarmClock className="h-3.5 w-3.5" />
+                  {t("ana.ringTitle")}
+                </p>
+                {data.ringWins + data.ringSnoozes > 0 ? (
+                  <>
+                    <div className="mb-2 flex items-center gap-2">
+                      <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-emerald-500"
+                          style={{ width: `${(data.ringWins / (data.ringWins + data.ringSnoozes)) * 100}%` }}
+                        />
+                      </div>
+                      <span className="text-xs font-bold tabular-nums">
+                        {Math.round((data.ringWins / (data.ringWins + data.ringSnoozes)) * 100)}%
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      {t("ana.ringStat", { w: data.ringWins, s: data.ringSnoozes })}
+                    </p>
+                  </>
+                ) : (
+                  <p className="text-[11px] text-muted-foreground">
+                    {t("ana.ringEmpty", { n: alarmsCount })}
+                  </p>
+                )}
+                {bestStreak > 0 && (
+                  <p className="mt-2 flex items-center gap-1 text-[11px] font-semibold text-orange-500">
+                    <Flame className="h-3.5 w-3.5" />
+                    {t("ana.ringStreak", { n: bestStreak })}
+                  </p>
+                )}
+              </div>
+            </SectionCard>
+          )}
 
           {/* ─── Odatlar barqarorligi ─── */}
           {data.habits.length > 0 && (

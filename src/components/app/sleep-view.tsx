@@ -14,6 +14,14 @@ import { useEffect, useMemo, useState } from "react";
 import { useStore } from "@/lib/store";
 import { useUlos, Chip, EmptyState, SectionCard, SectionHead } from "./kit";
 import { analyzeSleep, consistencyScore, sleepDebt, weeklySeries } from "@/lib/sleep";
+import {
+  bedtimePattern,
+  daySegments,
+  sessionKind,
+  sleepAdvice,
+  sleepTaskLink,
+  type AdviceAction,
+} from "@/lib/sleep-insights";
 import { inApkEnv } from "@/lib/notify";
 import { sensorAvailable, sensorStart, sensorStop } from "@/lib/sleep-sensor";
 import { fmtMinutes, fmtShortDate, isoLocal, parseLocal, uuidv7 } from "@/lib/utils-app";
@@ -23,12 +31,16 @@ import { motion } from "framer-motion";
 import {
   BatteryCharging,
   BedDouble,
+  Coffee,
   Footprints,
   Gauge,
+  Layers,
+  Lightbulb,
   Moon,
   MoonStar,
   Play,
   Square,
+  Sunrise,
   Timer,
   Trash2,
   Waves,
@@ -58,6 +70,9 @@ export default function SleepView() {
   const [quality, setQuality] = useState(3);
   const [lat, setLat] = useState(15);
   const [wakings, setWakings] = useState(0);
+  // dam olish (tushlik uyqusi) taymeri — null = oddiy sessiya
+  const [napTarget, setNapTarget] = useState<number | null>(null);
+  const [applied, setApplied] = useState<Set<string>>(new Set());
 
   const goalH = settings.sleepGoalH ?? 8;
   const goalMin = goalH * 60;
@@ -91,7 +106,7 @@ export default function SleepView() {
   }, [series]);
   const maxScale = Math.max(goalMin * 1.25, ...series.map((d) => d.sleepMin), 60);
 
-  const startSleep = async () => {
+  const startSleep = async (napMin?: number) => {
     const id = uuidv7();
     let sensor = false;
     if (apk && sensorOk && sensorOn) {
@@ -103,12 +118,13 @@ export default function SleepView() {
         import("sonner").then(({ toast }) => toast.error(t("sleep.sensorWeb")));
       }
     }
+    setNapTarget(napMin ?? null);
     setSleepActive({ id, start: isoLocal(new Date()), sensor });
   };
 
-  const confirmStop = async () => {
-    if (!active) return;
-    setBusy(true);
+  // Sessiyani saqlash yadrosi — dialog ham, avto-to'xtatish ham shu orqali
+  const saveSession = async (opts: { quality: number; lat: number; wakings: number }) => {
+    if (!active) return null;
     let motion: number[] | undefined;
     if (active.sensor) {
       const r = await sensorStop();
@@ -125,9 +141,9 @@ export default function SleepView() {
       id: active.id,
       start: active.start,
       end: isoLocal(new Date()),
-      latencyMin: lat,
-      wakings,
-      quality,
+      latencyMin: opts.lat,
+      wakings: opts.wakings,
+      quality: opts.quality,
       motion,
       sensor: active.sensor,
     };
@@ -137,22 +153,80 @@ export default function SleepView() {
       sess.score = a.score;
     }
     addSleepSession(sess);
+    return sess;
+  };
+
+  const confirmStop = async () => {
+    setBusy(true);
+    const sess = await saveSession({ quality, lat, wakings });
     setBusy(false);
     setStopOpen(false);
-    import("sonner").then(({ toast }) =>
-      toast.success(t("sleep.saved") + (sess.score != null ? ` · ${t("sleep.score")}: ${sess.score}` : ""))
-    );
+    if (sess) {
+      import("sonner").then(({ toast }) =>
+        toast.success(
+          t("sleep.saved") + (sess.score != null ? ` · ${t("sleep.score")}: ${sess.score}` : "")
+        )
+      );
+    }
+  };
+
+  // Dam olish taymeri tugadi — o'zi to'xtatadi va saqlaydi (aqilli rejim)
+  const autoNapStop = async () => {
+    if (!active) return;
+    const mins = napTarget ?? 0;
+    setNapTarget(null);
+    const sess = await saveSession({ quality: 3, lat: 0, wakings: 0 });
+    if (sess) {
+      import("sonner").then(({ toast }) =>
+        toast.success(t("sleep.napSaved", { m: mins }), {
+          description: sess.score != null ? `${t("sleep.score")}: ${sess.score}` : undefined,
+        })
+      );
+    }
   };
 
   const discard = () => {
     if (active?.sensor) void sensorStop();
     setSleepActive(null);
+    setNapTarget(null);
     setDropAsk(false);
     setStopOpen(false);
     import("sonner").then(({ toast }) => toast(t("sleep.discarded")));
   };
 
   const elapsedMin = active ? Math.max(0, Math.round((now - (parseLocal(active.start)?.getTime() ?? now)) / 60000)) : 0;
+
+  // ─── Aqili tahlil (v1.9) ───
+  const segRows = useMemo(() => daySegments(sessions, 7), [sessions]);
+  const pat = useMemo(() => bedtimePattern(sessions), [sessions]);
+  const alarms = useStore((s) => s.alarms);
+  const alarmStats = useStore((s) => s.alarmStats);
+  const tasks = useStore((s) => s.tasks);
+  const advices = useMemo(
+    () => sleepAdvice(sessions, alarms, alarmStats, settings),
+    [sessions, alarms, alarmStats, settings]
+  );
+  const link = useMemo(
+    () => sleepTaskLink(sessions, tasks, goalMin),
+    [sessions, tasks, goalMin]
+  );
+
+  // dam olish taymeri — vaqti kelganda o'zi to'xtatadi
+  useEffect(() => {
+    if (!active || napTarget == null) return;
+    if (elapsedMin >= napTarget) void autoNapStop();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [now, active, napTarget]);
+
+  const applyAdvice = (key: string, act: AdviceAction) => {
+    const st = useStore.getState();
+    if (act.kind === "setBedtime") st.setSettings({ sleepBedtime: act.value });
+    else if (act.kind === "setWindMin") st.setSettings({ sleepWindMin: act.value });
+    else if (act.kind === "setGoal") st.setSettings({ sleepGoalH: act.value });
+    else if (act.kind === "shiftAlarm") st.updateAlarm(act.alarmId, { time: act.value });
+    setApplied((prev) => new Set(prev).add(key));
+    import("sonner").then(({ toast }) => toast.success(t("sad.applied")));
+  };
 
   return (
     <div className="flex flex-col gap-3 px-4 pb-6 pt-2">
@@ -174,6 +248,12 @@ export default function SleepView() {
                 {t("sleep.startedAt", { t: active.start.slice(11, 16) })} · {t("sleep.elapsed")}{" "}
                 <span className="font-semibold tabular-nums text-foreground">{fmtMinutes(elapsedMin, t)}</span>
               </p>
+              {napTarget != null && (
+                <p className="mt-1 flex items-center gap-1.5 text-[11px] font-semibold text-amber-500">
+                  <Coffee className="h-3.5 w-3.5" />
+                  {t("sleep.napLeft", { m: Math.max(0, napTarget - elapsedMin) })}
+                </p>
+              )}
             </div>
             {active.sensor && (
               <Chip className="border-teal-500/25 bg-teal-500/10 text-teal-600 dark:text-teal-300">
@@ -209,13 +289,34 @@ export default function SleepView() {
               <Moon className="h-8 w-8" strokeWidth={1.8} />
             </span>
             <button
-              onClick={startSleep}
+              onClick={() => startSleep()}
               disabled={busy}
               className="brand-grad flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-bold text-white transition-transform active:scale-[0.99] disabled:opacity-60"
             >
               <Play className="h-4 w-4" />
               {t("sleep.start")}
             </button>
+          </div>
+
+          {/* Dam olish (tushlik uyqusi) — taymer bilan: o'zi to'xtatadi */}
+          <div className="mt-3 rounded-2xl border border-border bg-card p-3">
+            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
+              <Coffee className="h-3.5 w-3.5" />
+              {t("sleep.napTitle")}
+            </p>
+            <div className="mt-2 grid grid-cols-3 gap-1.5">
+              {[20, 30, 45].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => startSleep(n)}
+                  disabled={busy}
+                  className="rounded-xl border py-2.5 text-xs font-bold transition-all active:scale-95 hover:border-amber-500/40 hover:text-amber-500"
+                >
+                  {t("sleep.napBtn", { n })}
+                </button>
+              ))}
+            </div>
+            <p className="mt-2 text-[10.5px] leading-snug text-muted-foreground/70">{t("sleep.napHint")}</p>
           </div>
 
           {/* Sensor rejimi */}
@@ -353,6 +454,175 @@ export default function SleepView() {
         </div>
       </SectionCard>
 
+      {/* ─── Kun bo'yicha parchalar: kundagi barcha yotish joylari (v1.9) ─── */}
+      <SectionCard>
+        <SectionHead
+          icon={<Layers className="h-4 w-4" />}
+          title={t("sleep.segsTitle")}
+          sub={t("sleep.segsSub")}
+        />
+        {segRows.every((r) => r.segs.length === 0) ? (
+          <p className="rounded-2xl bg-muted/50 px-3 py-3 text-xs text-muted-foreground">{t("sleep.segsEmpty")}</p>
+        ) : (
+          <div className="flex flex-col gap-2.5">
+            {segRows
+              .slice()
+              .reverse()
+              .map((row) => {
+                const d = new Date(row.date + "T12:00");
+                const has = row.segs.length > 0;
+                return (
+                  <div key={row.date} className="rounded-2xl bg-muted/40 px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold">{fmtShortDate(d, lang)}</span>
+                      {has && (
+                        <Chip
+                          className={cn(
+                            "tabular-nums",
+                            row.totalMin >= goalMin
+                              ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                              : "border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                          )}
+                        >
+                          {fmtMinutes(row.totalMin, t)}
+                          {row.totalMin >= goalMin ? " ✓" : ""}
+                        </Chip>
+                      )}
+                      {row.napMin > 0 && (
+                        <Chip className="border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                          <Coffee className="h-3 w-3" /> {fmtMinutes(row.napMin, t)}
+                        </Chip>
+                      )}
+                      <span className="ml-auto text-[10px] text-muted-foreground">
+                        {has ? `${row.segs.length} ${t("sleep.segCount")}` : t("sleep.segNone")}
+                      </span>
+                    </div>
+                    {has && (
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {row.segs.map((sg, i) => (
+                          <span
+                            key={i}
+                            className={cn(
+                              "flex items-center gap-1 rounded-xl px-2 py-1 text-[10.5px] font-semibold tabular-nums",
+                              sg.kind === "night"
+                                ? "bg-violet-500/12 text-violet-600 dark:text-violet-300"
+                                : "bg-amber-500/12 text-amber-600 dark:text-amber-300"
+                            )}
+                          >
+                            {sg.kind === "night" ? <Moon className="h-3 w-3" /> : <Coffee className="h-3 w-3" />}
+                            {sg.start}→{sg.end} · {fmtMinutes(sg.min, t)}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ─── Yotish odatlari: qaysi paytlarda yotgani (v1.9) ─── */}
+      <SectionCard>
+        <SectionHead
+          icon={<Sunrise className="h-4 w-4" />}
+          title={t("sleep.patTitle")}
+          sub={pat.ok ? t("sleep.patSub", { n: pat.nights }) : t("sleep.patNeed")}
+        />
+        {pat.ok ? (
+          <>
+            <div className="grid grid-cols-3 gap-2">
+              <StatCell label={t("sleep.patBed")} value={pat.avgBed} sub={pat.bedSd > 0 ? `±${pat.bedSd} ${t("sleep.minShort")}` : undefined} />
+              <StatCell label={t("sleep.patWake")} value={pat.avgWake} />
+              <StatCell label={t("sleep.patDur")} value={fmtMinutes(pat.avgNightMin, t)} />
+            </div>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {pat.jetlagMin != null && Math.abs(pat.jetlagMin) >= 45 && (
+                <Chip className="border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400">
+                  {pat.jetlagMin > 0
+                    ? t("sleep.patJet+", { d: Math.abs(pat.jetlagMin) })
+                    : t("sleep.patJet-", { d: Math.abs(pat.jetlagMin) })}
+                </Chip>
+              )}
+              {pat.naps7 > 0 && (
+                <Chip className="border-teal-500/25 bg-teal-500/10 text-teal-600 dark:text-teal-300">
+                  <Coffee className="h-3 w-3" /> {t("sleep.patNaps", { n: pat.naps7, m: pat.napMin7 })}
+                </Chip>
+              )}
+              <Chip className="border-border bg-secondary text-secondary-foreground">
+                {t("sleep.patRange", { a: pat.earliest, b: pat.latest })}
+              </Chip>
+            </div>
+          </>
+        ) : (
+          <p className="rounded-2xl bg-muted/50 px-3 py-3 text-xs text-muted-foreground">{t("sleep.patEmpty")}</p>
+        )}
+      </SectionCard>
+
+      {/* ─── Aqili tavsiyalar: budilnik ↔ uyqu ↔ vazifalar bog'lovi (v1.9) ─── */}
+      {(advices.length > 0 || link.ok) && (
+        <SectionCard className="border-violet-500/20 bg-gradient-to-b from-violet-500/[0.05] to-transparent">
+          <SectionHead
+            icon={<Lightbulb className="h-4 w-4" />}
+            title={t("sad.title")}
+            sub={t("sad.sub")}
+            accent="text-violet-500"
+          />
+          {link.ok && (
+            <p className="mb-2 rounded-2xl bg-emerald-500/10 px-3 py-2.5 text-xs leading-relaxed text-emerald-700 dark:text-emerald-300">
+              {t("sad.link", { g: link.goodDone.toFixed(1), b: Math.max(1, Math.round(link.badDone)) , gd: link.goodDays, bd: link.badDays })}
+            </p>
+          )}
+          {advices.length === 0 ? (
+            <p className="rounded-2xl bg-muted/50 px-3 py-3 text-xs text-muted-foreground">{t("sad.empty")}</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {advices.map((ad, i) => {
+                const id = `${ad.key}:${i}`;
+                const done = applied.has(id);
+                return (
+                  <motion.div
+                    key={id}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: i * 0.05 }}
+                    className={cn(
+                      "flex items-start gap-2.5 rounded-2xl px-3 py-2.5",
+                      ad.tone === "warn" ? "bg-amber-500/10" : ad.tone === "good" ? "bg-emerald-500/10" : "bg-muted/60"
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "mt-0.5 shrink-0",
+                        ad.tone === "warn" ? "text-amber-500" : ad.tone === "good" ? "text-emerald-500" : "text-violet-500"
+                      )}
+                    >
+                      <Lightbulb className="h-3.5 w-3.5" />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs leading-relaxed">{t(ad.key, ad.vars)}</p>
+                      {ad.action && !done && ad.action.kind !== "openSleep" && (
+                        <button
+                          onClick={() => applyAdvice(id, ad.action!)}
+                          className="mt-1.5 rounded-xl bg-violet-500/15 px-3 py-1.5 text-[11px] font-bold text-violet-600 transition-colors hover:bg-violet-500/25 dark:text-violet-300"
+                        >
+                          {t(ad.actionKey ?? "sad.apply")}
+                        </button>
+                      )}
+                      {done && (
+                        <p className="mt-1 flex items-center gap-1 text-[10.5px] font-semibold text-emerald-500">
+                          ✓ {t("sad.applied")}
+                        </p>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          )}
+        </SectionCard>
+      )}
+
       {/* ─── Oxirgi sessiya tahlili ─── */}
       {last && lastAnalysis && (
         <SectionCard>
@@ -453,20 +723,31 @@ export default function SleepView() {
               .map((s) => {
                 const a = analyzeSleep(s, goalH);
                 const e = parseLocal(s.end);
+                const kind = sessionKind(s);
                 return (
                   <div key={s.id} className="flex items-center gap-2.5 py-2.5">
-                    <span className={cn("rounded-lg p-1.5", s.sensor ? "bg-teal-500/12 text-teal-500" : "bg-muted text-muted-foreground")}>
-                      {s.sensor ? <Waves className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+                    <span
+                      className={cn(
+                        "rounded-lg p-1.5",
+                        s.sensor
+                          ? "bg-teal-500/12 text-teal-500"
+                          : kind === "nap"
+                            ? "bg-amber-500/12 text-amber-500"
+                            : "bg-muted text-muted-foreground"
+                      )}
+                    >
+                      {s.sensor ? <Waves className="h-3.5 w-3.5" /> : kind === "nap" ? <Coffee className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
                     </span>
                     <div className="min-w-0 flex-1">
                       <p className="text-[13px] font-semibold">
-                        {last.end ? fmtShortDate(parseLocal(last.end) ?? new Date(), lang) : ""}
+                        {e ? fmtShortDate(e, lang) : ""}
                         {" · "}
                         {fmtMinutes(a?.sleepMin ?? 0, t)}
                       </p>
                       <p className="text-[10.5px] text-muted-foreground">
                         {s.start.slice(11, 16)} → {s.end.slice(11, 16)}
                         {s.sensor ? " · " + t("sleep.sensorData") : ""}
+                        {kind === "nap" ? " · " + t("sleep.isNap") : ""}
                       </p>
                     </div>
                     {s.score != null && (
@@ -603,7 +884,17 @@ export default function SleepView() {
   );
 }
 
-function StatCell({ label, value, tone }: { label: string; value: string; tone?: "good" | "warn" | "bad" }) {
+function StatCell({
+  label,
+  value,
+  tone,
+  sub,
+}: {
+  label: string;
+  value: string;
+  tone?: "good" | "warn" | "bad";
+  sub?: string;
+}) {
   return (
     <div className="rounded-2xl bg-muted/50 px-2 py-2.5 text-center">
       <p
@@ -616,6 +907,7 @@ function StatCell({ label, value, tone }: { label: string; value: string; tone?:
       >
         {value}
       </p>
+      {sub && <p className="text-[9px] text-muted-foreground/80">{sub}</p>}
       <p className="mt-0.5 text-[9.5px] text-muted-foreground">{label}</p>
     </div>
   );

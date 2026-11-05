@@ -8,7 +8,7 @@
 
 ## 📥 APK yuklab olish (Android 7.0+)
 
-Repositoriyadagi fayl: **[`apk/Universal-Life-OS-v1.8.apk`](apk/Universal-Life-OS-v1.8.apk)** (≈4.5 MB)
+Repositoriyadagi fayl: **[`apk/Universal-Life-OS-v1.9.apk`](apk/Universal-Life-OS-v1.9.apk)** (≈4.6 MB)
 
 1. Faylni bosing → **Download** (yoki `Download raw file`)
 2. Telefonda yuklangan faylni oching
@@ -41,6 +41,7 @@ Repositoriyadagi fayl: **[`apk/Universal-Life-OS-v1.8.apk`](apk/Universal-Life-O
 | 🔔 **Bildirishnomalar** | Vazifa eslatmasi (belgilangan vaqtdan oldin), har kuni odat va ertalabki reja eslatmasi — ilova yopiq turganda ham |
 | ⏰ **Aqili budilnik** | Missiyali budilnik (Mission Alarm uslubi): matematika, xotira, yozish, silkitish, qadamlar — ketma-ket zanjir. Snooze cheklovi, yengil uyg'otish, moslashuvchan qiyinlik |
 | 🌙 **Uyqu kuzatuvi** | Sensor rejimi (akselerometr + Foreground Service), uyqu tahlili va ballari, yotish eslatmasi (budilnik vaqtidan avtomatik hisoblanadi) |
+| 🔗 **Uyqu ↔ Budilnik ↔ Vazifalar** (v1.9) | Kunlik parchalar (bir kundagi barcha yotish joylari), yotish odatlari tahlili, dam olish taymeri, aqili tavsiyalar («Qo'llash» bilan avtomatik sozlanadi), analitikada bog'langan statistika |
 
 ---
 
@@ -71,6 +72,20 @@ Budilnik endi oddiy jiringlovchi emas — **Mission Alarm uslubidagi missiyalar*
 - **Snooze nazorati**: davomiyligi (5/10/15 daq), soni cheklovi (∞/0/1/2/3) — cheklov tugasa, snooze tugmasi o'chadi
 - **Yengil uyg'otish**: ovoz asta-sekin kuchayadi (≈40 sekund)
 - **Sensor missiyalari**: akselerometr orqali; sensor javob bermasa — zaxira tugma chiqadi (tizilib qolmaysiz)
+
+---
+
+## 🔗 Uyqu ↔ Budilnik ↔ Vazifalar (v1.9)
+
+Endi bu uch modul **bitta tizim** — bir-birini ko'radi va bir-biriga moslashadi:
+
+- **Kun bo'yicha parchalar**: kunda bir necha marta yotish (4 s, 3 s, tushlik uyqusi…) — hammasi alohida ko'rsatiladi va kuniga jamlanadi
+- **Yotish odatlari**: qaysi soatlarda yotganingiz avtomatik aniqlanadi (o'rtacha yotish, og'ish, uyg'onish, ish kuni ↔ dam olish farqi)
+- **Dam olish taymeri**: 20/30/45 daqiqa — vaqt tugagach sessiya **o'zi** to'xtatiladi va saqlanadi
+- **Aqili tavsiyalar**: uyqu qarzi, yotish vaqti surinishi, ko'p snooze, uxlashga qiyinlik — har biri aniq harakat bilan ko'rinadi va **«Qo'llash»** tugmasi bilan sozlamalarga o'z-o'zidan yoziladi
+- **Zang paytida**: uyqu qarzi katta bo'lsa — zang oynasida ko'rsatiladi («snooze qilsangiz qarz ortadi»)
+- **Budilnik aqili rejimi**: yotish eslatmasi endi **o'lchangan** uxlash vaqtingizni ham hisobga oladi
+- **Analitika**: «Uyqu va budilnik» bo'limi — davr bo'yicha o'rtacha tun, qarz, dam olishlar, budilnik intizomi (%), eng yaxshi streak; **Life Score'ga uyqu qo'shildi**; «uyqu yetarli kunlarda N barobar ko'p ish bajarilgan» xulosalari
 
 ---
 

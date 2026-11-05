@@ -18,6 +18,7 @@ import { useUlos, Chip, EmptyState, SectionCard, Segmented } from "./kit";
 import { MISSION_META } from "./missions";
 import { nextOccurrence } from "@/lib/alarm";
 import { pad2, relDay } from "@/lib/utils-app";
+import { sessionKind } from "@/lib/sleep-insights";
 import type { Alarm, MissionDifficulty, MissionType } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -70,17 +71,42 @@ export default function AlarmView() {
     } else {
       addAlarm(data);
     }
-    // ─── Aqili rejim: yotish eslatmasi o'zi qo'yiladi (mavjud bo'lmasa) ───
+    // ─── Aqili rejim: yotish eslatmasi o'zi qo'yiladi (v1.9 — o'lchangan
+    // uxlash vaqti ham hisobga olinadi) ───
     const st = useStore.getState();
-    if (data.smart && data.enabled && !st.settings.sleepBedtime) {
+    if (data.smart && data.enabled) {
       const [h, m] = data.time.split(":").map(Number);
       const goalH = st.settings.sleepGoalH ?? 8;
-      const total = h * 60 + m - goalH * 60;
-      const btH = (((Math.floor(total / 60) % 24) + 24) % 24);
+      // so'nggi 7 tunning o'rtacha uxlash vaqti (sensor/qo'lda)
+      const nights = st.sleepSessions.filter((s) => sessionKind(s) === "night").slice(-7);
+      const avgLat = nights.length
+        ? Math.round(
+            nights.reduce((a, s) => a + Math.max(0, Math.min(s.latencyMin ?? 12, 60)), 0) / nights.length
+          )
+        : 12;
+      const total = h * 60 + m - goalH * 60 - avgLat;
+      const btH = ((Math.floor(total / 60) % 24) + 24) % 24;
       const btM = ((total % 60) + 60) % 60;
       const bt = `${pad2(btH)}:${pad2(btM)}`;
-      st.setSettings({ sleepBedtime: bt });
-      import("sonner").then(({ toast }) => toast(t("alarm.bedtimeAuto", { t: bt })));
+      const cur = st.settings.sleepBedtime;
+      if (!cur) {
+        st.setSettings({ sleepBedtime: bt });
+        import("sonner").then(({ toast }) => toast(t("alarm.bedtimeAuto", { t: bt })));
+      } else {
+        // mavjud eslatma o'lchangan rejamdan 45+ daqiqa chetda — yangilaymiz
+        const toMin = (x: string) => {
+          const [hh, mm] = x.split(":").map(Number);
+          let v = hh * 60 + mm;
+          if (v < 12 * 60) v += 24 * 60;
+          return v;
+        };
+        if (Math.abs(toMin(bt) - toMin(cur)) >= 45) {
+          st.setSettings({ sleepBedtime: bt });
+          import("sonner").then(({ toast }) => toast(t("alarm.bedtimeUpdated", { o: cur, t: bt })));
+        } else {
+          import("sonner").then(({ toast }) => toast(t("alarm.saved")));
+        }
+      }
     } else {
       import("sonner").then(({ toast }) => toast(t("alarm.saved")));
     }

@@ -15,11 +15,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { BellRing, Check, Sparkles, Timer, TimerOff } from "lucide-react";
+import { BellRing, Check, Moon, Sparkles, Timer, TimerOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MissionDifficulty, MissionType, PendingRing } from "@/lib/types";
-import { parseLocal } from "@/lib/utils-app";
+import { fmtMinutes, parseLocal } from "@/lib/utils-app";
 import { useStore } from "@/lib/store";
+import { sleepDebt, weeklySeries } from "@/lib/sleep";
 import { MissionRunner, shuffle } from "./missions";
 
 interface Props {
@@ -142,6 +143,17 @@ export default function RingOverlay({ ring, t, onDismiss, onSnooze }: Props) {
   const snoozeLeft = ring.snoozeLimit == null ? null : Math.max(0, ring.snoozeLimit - snoozeUsed);
   const snoozeBlocked = ring.snoozeLimit === 0 || (snoozeLeft != null && snoozeLeft <= 0);
 
+  // ─── Uyqu qarzi (v1.9): budilnik ↔ uyqu bog'lovi — zang paytida ko'rsatiladi ──
+  const debtMin = useMemo(() => {
+    if (ring.kind !== "alarm") return 0;
+    const st = useStore.getState();
+    const goalMin = (st.settings.sleepGoalH ?? 8) * 60;
+    return sleepDebt(weeklySeries(st.sleepSessions, 7), goalMin);
+    // faqat birinchi renderda hisoblanadi
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const showDebt = debtMin >= 120;
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -191,6 +203,17 @@ export default function RingOverlay({ ring, t, onDismiss, onSnooze }: Props) {
           <p className="rounded-full bg-rose-500/15 px-3 py-1 text-xs font-semibold text-rose-300">
             {t("ring.late", { t: `${lateMin} min` })}
           </p>
+        )}
+        {showDebt && (
+          <motion.p
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.4 }}
+            className="mt-1 flex items-center gap-1.5 rounded-full bg-violet-500/15 px-3 py-1 text-[11px] font-semibold text-violet-300"
+          >
+            <Moon className="h-3 w-3" />
+            {t("ring.debt", { d: fmtMinutes(debtMin, t) })}
+          </motion.p>
         )}
         <p className="mt-2 text-[13px] tabular-nums text-white/40">
           {now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}

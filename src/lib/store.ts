@@ -8,6 +8,7 @@ import type {
   AIRecord,
   Alarm,
   AlarmStat,
+  RingEvent,
   Expense,
   FinanceCategory,
   Goal,
@@ -66,6 +67,8 @@ interface StoreState {
   alarms: Alarm[];
   /** Budilnik bo'yicha uyg'onish statistikasi — zang natijasidan avtomatik yig'iladi (v1.8) */
   alarmStats: Record<string, AlarmStat>;
+  /** Zang tarixi — analitika bo'limi uchun (v1.9), oxirgi 500 ta natija */
+  ringHistory: RingEvent[];
   sleepSessions: SleepSession[];
   /** Hozir davom etayotgan uyqu sessiyasi (null = yo'q) */
   sleepActive: { id: string; start: string; sensor: boolean } | null;
@@ -154,6 +157,7 @@ export const useStore = create<StoreState>()(
 
       alarms: [],
       alarmStats: {},
+      ringHistory: [],
       sleepSessions: [],
       sleepActive: null,
       pendingRings: [],
@@ -370,7 +374,16 @@ export const useStore = create<StoreState>()(
             last: outcome,
             lastAt: new Date().toISOString(),
           };
-          return { alarmStats: { ...s.alarmStats, [alarmId]: next } };
+          // zang tarixi — analitika bo'limi uchun (oxirgi 500 ta)
+          const ev: RingEvent = {
+            key: `${alarmId}:${Date.now()}`,
+            alarmId,
+            outcome,
+            snoozes: snoozes ?? 0,
+            at: new Date().toISOString(),
+          };
+          const hist = [...s.ringHistory, ev].slice(-500);
+          return { alarmStats: { ...s.alarmStats, [alarmId]: next }, ringHistory: hist };
         }),
 
       // ─── Uyqu ───
@@ -421,6 +434,7 @@ export const useStore = create<StoreState>()(
             timeEntries: s.timeEntries,
             alarms: s.alarms,
             alarmStats: s.alarmStats,
+            ringHistory: s.ringHistory,
             sleepSessions: s.sleepSessions,
             // AI kaliti (BYOK) eksportga KIRMAYDI — faqat qurilmada qoladi (PRD 8.3)
             // sleepActive / pendingRings — vaqtinchalik holat, eksportga kirmaydi
@@ -443,6 +457,7 @@ export const useStore = create<StoreState>()(
           aiUsageCount: 0,
           alarms: [],
           alarmStats: {},
+          ringHistory: [],
           sleepSessions: [],
           sleepActive: null,
           pendingRings: [],
@@ -468,6 +483,7 @@ export const useStore = create<StoreState>()(
         const timeEntries = arr("timeEntries");
         const aiRecords = arr("aiRecords");
         const alarms = arr("alarms");
+        const ringHistory = arr("ringHistory");
         const sleepSessions = arr("sleepSessions");
         // alarmStats — obyekt ko'rinishida (Record<string, AlarmStat>)
         const stRaw = j.alarmStats;
@@ -502,6 +518,7 @@ export const useStore = create<StoreState>()(
           aiRecords: (aiRecords as AIRecord[]) ?? [],
           alarms: (alarms as Alarm[]) ?? [],
           alarmStats: alarmStats ?? get().alarmStats,
+          ringHistory: (ringHistory as RingEvent[]) ?? get().ringHistory,
           sleepSessions: (sleepSessions as SleepSession[]) ?? [],
           sleepActive: null,
           pendingRings: [],

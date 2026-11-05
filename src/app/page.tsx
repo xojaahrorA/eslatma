@@ -415,8 +415,8 @@ export default function Home() {
             <div className="brand-grad mx-4 mt-3 flex items-center gap-3 rounded-2xl px-4 py-3 text-white shadow-lg">
               <Download className="h-5 w-5 shrink-0" />
               <a
-                href="/Universal-Life-OS-v1.8.apk"
-                download="Universal-Life-OS-v1.8.apk"
+                href="/Universal-Life-OS-v1.9.apk"
+                download="Universal-Life-OS-v1.9.apk"
                 className="flex-1 text-[13px] font-semibold leading-tight"
               >
                 {t("app.apkBanner")}
