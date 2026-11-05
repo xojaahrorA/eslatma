@@ -695,6 +695,26 @@ export const dictUz: Dict = {
   "sleep.patRange": "yotish: {a} – {b} oralig'ida",
   "sleep.patEmpty": "Qaysi soatlarda yotganingiz avtomatik aniqlanadi — 2-3 ta tun yozuvidan keyin",
 
+  // ─── v1.10: bugungi norma + qo'lda kiritish ───
+  "sleep.todayTitle": "Bugungi norma",
+  "sleep.todaySub": "bo'lib-bo'lib uxlash jamlanadi — yetish va oshish kuzatiladi",
+  "sleep.todayLeft": "Normaga {d} qoldi",
+  "sleep.todayOver": "Norma bajarildi! +{d} ortiqcha",
+  "sleep.todayHit": "Norma bajarildi ✓",
+  "sleep.todayEmpty": "Bugun hali yozuv yo'q — tun yoki tushlik uyqusini qo'shing",
+  "sleep.todaySegs": "{n} bo'lakdan yig'ildi",
+  "sleep.manualTitle": "Qo'lda qo'shish",
+  "sleep.manualSub": "Eslab qolgan yotish–uyg'onish vaqtini kiriting — tahlillar avtomatik hisoblanadi",
+  "sleep.mDate": "Kun",
+  "sleep.mBed": "Yotdim",
+  "sleep.mUp": "Uyg'ondim",
+  "sleep.mSave": "Saqlash",
+  "sleep.mSaved": "Uyqu yozuvi qo'shildi",
+  "sleep.mErr": "Uyg'onish vaqti yotishdan keyin bo'lishi kerak",
+  "sleep.mErrLong": "Sessiya 16 soatdan uzun bo'lmasin",
+  "sleep.manualTag": "qo'lda",
+  "sleep.bedtimeOff": "Yotish eslatmasi o'chiq — unutmaslik uchun yoqib qo'ying",
+
   // ─── v1.9: aqili tavsiyalar (budilnik ↔ uyqu ↔ vazifalar) ───
   "sad.title": "Aqili tavsiyalar",
   "sad.sub": "budilnik, uyqu va vazifalar birgalikda tahlil qilinadi",

@@ -689,6 +689,26 @@ export const dictEn: Dict = {
   "sleep.patRange": "bedtime within {a} – {b}",
   "sleep.patEmpty": "Your typical bedtime is detected automatically — after 2–3 recorded nights",
 
+  // ─── v1.10: daily goal + manual entry ───
+  "sleep.todayTitle": "Today's goal",
+  "sleep.todaySub": "all sleep today adds up — under and over are tracked",
+  "sleep.todayLeft": "{d} to reach the goal",
+  "sleep.todayOver": "Goal met! +{d} extra",
+  "sleep.todayHit": "Goal met ✓",
+  "sleep.todayEmpty": "No records yet today — add a night sleep or a nap",
+  "sleep.todaySegs": "built from {n} segments",
+  "sleep.manualTitle": "Add manually",
+  "sleep.manualSub": "Enter bedtime and wake time from memory — analytics update automatically",
+  "sleep.mDate": "Date",
+  "sleep.mBed": "Went to bed",
+  "sleep.mUp": "Woke up",
+  "sleep.mSave": "Save",
+  "sleep.mSaved": "Sleep record added",
+  "sleep.mErr": "Wake time must be after bedtime",
+  "sleep.mErrLong": "A session can't be longer than 16 hours",
+  "sleep.manualTag": "manual",
+  "sleep.bedtimeOff": "Bedtime reminder is off — turn it on so you don't forget",
+
   // ─── v1.9: smart advice (alarm ↔ sleep ↔ tasks) ───
   "sad.title": "Smart advice",
   "sad.sub": "alarm, sleep and tasks analyzed together",

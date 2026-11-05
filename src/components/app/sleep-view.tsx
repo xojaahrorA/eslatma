@@ -24,7 +24,7 @@ import {
 } from "@/lib/sleep-insights";
 import { inApkEnv } from "@/lib/notify";
 import { sensorAvailable, sensorStart, sensorStop } from "@/lib/sleep-sensor";
-import { fmtMinutes, fmtShortDate, isoLocal, parseLocal, uuidv7 } from "@/lib/utils-app";
+import { fmtMinutes, fmtShortDate, isoLocal, pad2, parseLocal, uuidv7 } from "@/lib/utils-app";
 import type { SleepSession } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
@@ -39,6 +39,7 @@ import {
   Moon,
   MoonStar,
   Play,
+  Plus,
   Square,
   Sunrise,
   Timer,
@@ -73,6 +74,15 @@ export default function SleepView() {
   // dam olish (tushlik uyqusi) taymeri — null = oddiy sessiya
   const [napTarget, setNapTarget] = useState<number | null>(null);
   const [applied, setApplied] = useState<Set<string>>(new Set());
+  // ─── Qo'lda qo'shish: esdan chiqqan yotishni keyin yozish (v1.10) ───
+  const [manOpen, setManOpen] = useState(false);
+  const today0 = new Date();
+  const [mDate, setMDate] = useState(
+    () => `${today0.getFullYear()}-${pad2(today0.getMonth() + 1)}-${pad2(today0.getDate())}`
+  );
+  const [mBed, setMBed] = useState("23:30");
+  const [mUp, setMUp] = useState("07:00");
+  const [mErr, setMErr] = useState<string | null>(null);
 
   const goalH = settings.sleepGoalH ?? 8;
   const goalMin = goalH * 60;
@@ -105,6 +115,12 @@ export default function SleepView() {
     return Math.round(days.reduce((a, d) => a + d.sleepMin, 0) / days.length);
   }, [series]);
   const maxScale = Math.max(goalMin * 1.25, ...series.map((d) => d.sleepMin), 60);
+
+  // ─── Bugungi norma: bo'lib-bo'lib yig'ilgan jami (v1.10) ───
+  const todayRow = useMemo(() => daySegments(sessions, 1)[0] ?? null, [sessions]);
+  const todayPct = todayRow && todayRow.totalMin > 0 ? Math.min(199, Math.round((todayRow.totalMin / goalMin) * 100)) : 0;
+  const leftMin = todayRow ? Math.max(0, goalMin - todayRow.totalMin) : goalMin;
+  const overMin = todayRow ? Math.max(0, todayRow.totalMin - goalMin) : 0;
 
   const startSleep = async (napMin?: number) => {
     const id = uuidv7();
@@ -192,6 +208,50 @@ export default function SleepView() {
     setDropAsk(false);
     setStopOpen(false);
     import("sonner").then(({ toast }) => toast(t("sleep.discarded")));
+  };
+
+  // ─── Qo'lda qo'shish: yotish–uyg'onish vaqtini keyin yozish ───
+  const saveManual = () => {
+    const [bh, bm] = mBed.split(":").map(Number);
+    const [uh, um] = mUp.split(":").map(Number);
+    const bed = parseLocal(`${mDate}T00:00`);
+    if (!bed || Number.isNaN(bh) || Number.isNaN(uh)) {
+      setMErr(t("sleep.mErr"));
+      return;
+    }
+    const b = new Date(bed);
+    b.setHours(Math.min(23, bh), Math.min(59, bm || 0), 0, 0);
+    const u = new Date(bed);
+    u.setHours(Math.min(23, uh), Math.min(59, um || 0), 0, 0);
+    if (u.getTime() <= b.getTime()) u.setDate(u.getDate() + 1); // kechadan o'tgan
+    const dur = Math.round((u.getTime() - b.getTime()) / 60_000);
+    if (dur < 1) {
+      setMErr(t("sleep.mErr"));
+      return;
+    }
+    if (dur > 16 * 60) {
+      setMErr(t("sleep.mErrLong"));
+      return;
+    }
+    const sess: SleepSession = {
+      id: uuidv7(),
+      start: isoLocal(b),
+      end: isoLocal(u),
+      latencyMin: 12,
+      wakings: 0,
+      manual: true,
+    };
+    const a = analyzeSleep(sess, goalH);
+    if (a) {
+      sess.stages = a.stages;
+      sess.score = a.score;
+    }
+    addSleepSession(sess);
+    setManOpen(false);
+    setMErr(null);
+    import("sonner").then(({ toast }) =>
+      toast.success(t("sleep.mSaved") + (sess.score != null ? ` · ${t("sleep.score")}: ${sess.score}` : ""))
+    );
   };
 
   const elapsedMin = active ? Math.max(0, Math.round((now - (parseLocal(active.start)?.getTime() ?? now)) / 60000)) : 0;
@@ -357,6 +417,91 @@ export default function SleepView() {
         </SectionCard>
       )}
 
+      {/* ─── Bugungi norma: bo'lib-bo'lib yig'iladi, yetish/oshish kuzatiladi (v1.10) ─── */}
+      <SectionCard>
+        <SectionHead
+          icon={<Gauge className="h-4 w-4" />}
+          title={t("sleep.todayTitle")}
+          sub={t("sleep.todaySub")}
+        />
+        {todayRow && todayRow.segs.length > 0 ? (
+          <>
+            <div className="mb-2 flex items-end justify-between gap-2">
+              <p className="text-2xl font-extrabold leading-none tabular-nums">
+                {fmtMinutes(todayRow.totalMin, t)}
+                <span className="ml-1.5 text-xs font-semibold text-muted-foreground">/ {goalH}h</span>
+              </p>
+              <Chip
+                className={cn(
+                  "tabular-nums",
+                  todayRow.totalMin >= goalMin
+                    ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    : "border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                )}
+              >
+                {todayPct}%
+              </Chip>
+            </div>
+            {/* Progress: normaldan oshsa — 100% to'ldirilgandan keyin emerald chiziq */}
+            <div className="relative h-3 w-full overflow-hidden rounded-full bg-muted">
+              <div
+                className={cn(
+                  "h-full rounded-full transition-all",
+                  todayRow.totalMin >= goalMin ? "bg-emerald-500" : "brand-grad"
+                )}
+                style={{ width: `${Math.min(100, todayPct)}%` }}
+              />
+            </div>
+            <p
+              className={cn(
+                "mt-2 text-[11.5px] font-semibold",
+                todayRow.totalMin >= goalMin ? "text-emerald-500" : "text-amber-500"
+              )}
+            >
+              {leftMin > 0
+                ? t("sleep.todayLeft", { d: fmtMinutes(leftMin, t) })
+                : overMin > 0
+                  ? t("sleep.todayOver", { d: fmtMinutes(overMin, t) })
+                  : t("sleep.todayHit")}
+            </p>
+            {/* Kundagi bo'limlar: tun + tushlik uyqusi */}
+            {todayRow.segs.length > 1 && (
+              <p className="mt-1 text-[10.5px] text-muted-foreground">
+                {t("sleep.todaySegs", { n: todayRow.segs.length })}
+              </p>
+            )}
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {todayRow.segs.map((sg, i) => (
+                <span
+                  key={i}
+                  className={cn(
+                    "flex items-center gap-1 rounded-xl px-2 py-1 text-[10.5px] font-semibold tabular-nums",
+                    sg.kind === "night"
+                      ? "bg-violet-500/12 text-violet-600 dark:text-violet-300"
+                      : "bg-amber-500/12 text-amber-600 dark:text-amber-300"
+                  )}
+                >
+                  {sg.kind === "night" ? <Moon className="h-3 w-3" /> : <Coffee className="h-3 w-3" />}
+                  {sg.start}→{sg.end} · {fmtMinutes(sg.min, t)}
+                </span>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="rounded-2xl bg-muted/50 px-3 py-3 text-xs text-muted-foreground">{t("sleep.todayEmpty")}</p>
+        )}
+        <button
+          onClick={() => {
+            setMErr(null);
+            setManOpen(true);
+          }}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-violet-500/40 py-3 text-sm font-bold text-violet-600 transition-colors hover:bg-violet-500/10 dark:text-violet-300"
+        >
+          <Plus className="h-4 w-4" />
+          {t("sleep.manualTitle")}
+        </button>
+      </SectionCard>
+
       {/* ─── Sozlamalar ─── */}
       <SectionCard>
         <SectionHead icon={<Gauge className="h-4 w-4" />} title={t("sleep.goal")} sub={t("sleep.goalShort", { h: goalH })} />
@@ -407,6 +552,12 @@ export default function SleepView() {
             <span className={cn("h-5 w-5 rounded-full bg-white shadow transition-transform", bedtime && "translate-x-5")} />
           </span>
         </button>
+        {!bedtime && (
+          <p className="mt-2 flex items-start gap-1.5 rounded-xl bg-amber-500/10 px-3 py-2 text-[10.5px] leading-snug text-amber-600 dark:text-amber-300">
+            <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            {t("sleep.bedtimeOff")}
+          </p>
+        )}
       </SectionCard>
 
       {/* ─── Statistika: 7 kun ─── */}
@@ -747,6 +898,7 @@ export default function SleepView() {
                       <p className="text-[10.5px] text-muted-foreground">
                         {s.start.slice(11, 16)} → {s.end.slice(11, 16)}
                         {s.sensor ? " · " + t("sleep.sensorData") : ""}
+                        {s.manual ? " · " + t("sleep.manualTag") : ""}
                         {kind === "nap" ? " · " + t("sleep.isNap") : ""}
                       </p>
                     </div>
@@ -877,6 +1029,67 @@ export default function SleepView() {
                 {t("sleep.dropConfirm")}
               </button>
             </div>
+          </motion.div>
+        </div>
+      )}
+      {/* ─── Qo'lda kiritish dialogi (v1.10): esdan chiqqan yotishni yozish ─── */}
+      {manOpen && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 backdrop-blur-sm" onClick={() => setManOpen(false)}>
+          <motion.div
+            initial={{ y: 320 }}
+            animate={{ y: 0 }}
+            transition={{ type: "spring", damping: 30, stiffness: 300 }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-[520px] rounded-t-3xl border bg-popover p-5 pb-8"
+          >
+            <div className="mx-auto mb-4 h-1 w-10 rounded-full bg-muted-foreground/30" />
+            <div className="mb-4 flex items-start justify-between gap-2">
+              <div>
+                <h3 className="text-base font-bold">{t("sleep.manualTitle")}</h3>
+                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{t("sleep.manualSub")}</p>
+              </div>
+              <button onClick={() => setManOpen(false)} aria-label={t("common.close")} className="rounded-xl bg-muted p-2 text-muted-foreground">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <p className="mb-1.5 text-[11px] font-semibold text-muted-foreground">{t("sleep.mDate")}</p>
+            <input
+              type="date"
+              value={mDate}
+              onChange={(e) => setMDate(e.target.value)}
+              className="w-full rounded-2xl bg-muted/60 px-3 py-3 text-sm font-bold tabular-nums outline-none"
+            />
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div>
+                <p className="mb-1.5 text-[11px] font-semibold text-muted-foreground">{t("sleep.mBed")}</p>
+                <input
+                  type="time"
+                  value={mBed}
+                  onChange={(e) => setMBed(e.target.value || "23:30")}
+                  className="w-full rounded-2xl bg-muted/60 px-3 py-3 text-sm font-bold tabular-nums outline-none"
+                />
+              </div>
+              <div>
+                <p className="mb-1.5 text-[11px] font-semibold text-muted-foreground">{t("sleep.mUp")}</p>
+                <input
+                  type="time"
+                  value={mUp}
+                  onChange={(e) => setMUp(e.target.value || "07:00")}
+                  className="w-full rounded-2xl bg-muted/60 px-3 py-3 text-sm font-bold tabular-nums outline-none"
+                />
+              </div>
+            </div>
+
+            {mErr && <p className="mt-2 text-[11px] font-semibold text-rose-500">{mErr}</p>}
+
+            <button
+              onClick={saveManual}
+              className="brand-grad mt-4 w-full rounded-2xl py-3 text-sm font-bold text-white transition-transform active:scale-[0.99]"
+            >
+              {t("sleep.mSave")}
+            </button>
           </motion.div>
         </div>
       )}

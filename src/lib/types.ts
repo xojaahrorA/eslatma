@@ -100,6 +100,8 @@ export interface SleepSession {
   motion?: number[];
   /** Akselerometr sensori bilan yig'ilganmi */
   sensor?: boolean;
+  /** Foydalanuvchi keyin qo'lda kiritganmi (esdan chiqqan yotish) */
+  manual?: boolean;
   /** Tahlil natijasi (daqiqalarda) */
   stages?: SleepStages;
   /** Uyqu ballari 0..100 */

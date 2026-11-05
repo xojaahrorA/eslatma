@@ -1102,7 +1102,7 @@ export default function SettingsView() {
             </Chip>
           ))}
         </div>
-        <p className="mt-3 text-[10px] text-muted-foreground/60">Universal Life OS · v1.9 · PRD v2.0</p>
+        <p className="mt-3 text-[10px] text-muted-foreground/60">Universal Life OS · v1.10 · PRD v2.0</p>
       </SectionCard>
     </div>
   );
